@@ -1,0 +1,7 @@
+time_min,signal,sample_id,group
+0,1.2,00123,control
+1,1.4,00124,control
+2,,00125,control
+3,1.8,00126,control
+4,2.8,00127,treated
+5,3.3,00128,treated

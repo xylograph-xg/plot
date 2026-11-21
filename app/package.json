@@ -1,0 +1,50 @@
+{
+  "name": "sciplot",
+  "description": "Local macOS plotting toolbox for spreadsheets and CSV files",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "desktop": "npm run build && electron .",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "package:mac": "npm run build && electron-packager . '个人作图工具箱' --platform=darwin --arch=arm64 --app-bundle-id=com.plot-toolbox.local --out=../release --overwrite --asar --no-prune --ignore='^/(src|node_modules|public|examples|vite\\.config\\.ts|index\\.html|eslint\\.config\\.js|tsconfig[^/]*|package-lock\\.json|README\\.md)(/|$)' && codesign --force --deep --sign - '../release/个人作图工具箱-darwin-arm64/个人作图工具箱.app'"
+  },
+  "dependencies": {
+    "echarts": "^6.1.0",
+    "file-saver": "^2.0.5",
+    "i18next": "^26.3.1",
+    "jspdf": "^4.2.1",
+    "papaparse": "^5.5.3",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-i18next": "^17.0.8",
+    "svg2pdf.js": "^2.7.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "zundo": "^2.3.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/file-saver": "^2.0.7",
+    "@types/node": "^24.12.3",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "electron": "^45.3.3",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "tailwindcss": "^4.3.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.59.2",
+    "vite": "^8.0.12"
+  },
+  "productName": "个人作图工具箱",
+  "main": "desktop/main.cjs"
+}

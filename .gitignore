@@ -1,0 +1,5 @@
+# Independent upstream clones; see docs/upstream.md.
+/references/
+.DS_Store
+
+/release/
