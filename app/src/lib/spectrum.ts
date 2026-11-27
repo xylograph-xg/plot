@@ -1,30 +1,31 @@
-import type { ChartConfig, SpectrumFitConfig, SpectrumShape } from '../types';
+import type { ChartConfig, SeriesMapping, SpectrumFitConfig, SpectrumParameters, SpectrumPeakParameters, SpectrumShape } from '../types';
 import { axisBounds } from './axisBounds';
 import { fitFromSeeds, leastSquares } from './fitLeastSquares';
 import type { ResolvedSeries } from './xySeries';
+import { evenlySample } from './stats';
 import { voigtReal } from './voigt';
 import { fitResiduals, type ResidualPoint } from './residuals';
 
 export const spectrumShapes = ['gaussian', 'lorentzian', 'voigt', 'logNormal', 'splitGaussian'] as const;
 export const spectrumBaselines = ['constant', 'linear', 'zero'] as const;
 export const maxSpectrumPeaks = 5;
+const minLogNormalSkew = 1e-8;
 
 type Point = { x: number; y: number };
 type Coordinates = [number, number | null][];
-interface Peak {
-  center: number;
-  height: number;
+interface Peak extends SpectrumPeakParameters {
   fwhm: number;
   points: Coordinates;
-  centerY: number;
+  shift?: number;
 }
-type SpectrumResult = {
+export type SpectrumResult = {
   peaks: Peak[];
   total: Coordinates;
   residuals: ResidualPoint[];
   r2: number;
   count: number;
-} | { error: 'tooFew' | 'failed' | 'centers' | 'axis' };
+  background: SpectrumParameters['background'];
+} | { error: 'tooFew' | 'failed' | 'centers' | 'axis' | 'parameters' };
 
 interface SpectrumView {
   points: Point[];
@@ -32,7 +33,7 @@ interface SpectrumView {
   fits?: Map<string, SpectrumResult>;
 }
 
-const cache = new WeakMap<ResolvedSeries, Map<string, SpectrumView>>();
+const cache = new WeakMap<ResolvedSeries['points'], Map<string, SpectrumView>>();
 
 function spectrumView(chart: ChartConfig, series: ResolvedSeries): SpectrumView {
   const xAxis = axisBounds(chart.xAxis);
@@ -40,10 +41,10 @@ function spectrumView(chart: ChartConfig, series: ResolvedSeries): SpectrumView 
   const yAxis = axisBounds(yConfig);
   const xLog = chart.xAxis.scale === 'log';
   const yLog = yConfig.scale === 'log';
-  let entries = cache.get(series);
+  let entries = cache.get(series.points);
   if (!entries) {
     entries = new Map();
-    cache.set(series, entries);
+    cache.set(series.points, entries);
   }
   const key = JSON.stringify([xAxis, yAxis, xLog, yLog]);
   const existing = entries.get(key);
@@ -88,7 +89,7 @@ function peaksIn(points: Point[], count: number): Point[] {
   });
   const [min, max] = smooth.reduce(([low, high], value) => [Math.min(low, value), Math.max(high, value)], [Infinity, -Infinity]);
   const residuals = smooth.map((value, index) => Math.abs(value - points[index].y)).sort((a, b) => a - b);
-  const threshold = Math.max((max - min) * 0.06, residuals[Math.floor(residuals.length / 2)] * 5);
+  const threshold = Math.max((max - min) * 0.025, residuals[Math.floor(residuals.length / 2)] * 3);
   const candidates: { point: Point; prominence: number }[] = [];
   const look = Math.max(2, Math.ceil(points.length * 0.18));
   for (let i = 1; i < smooth.length - 1; i += 1) {
@@ -104,7 +105,7 @@ function peaksIn(points: Point[], count: number): Point[] {
     candidates.push({ point: at, prominence });
   }
   const selected: Point[] = [];
-  const spacing = 0.025 * (points[points.length - 1].x - points[0].x);
+  const spacing = 0.015 * (points[points.length - 1].x - points[0].x);
   for (const { point } of candidates.sort((a, b) => b.prominence - a.prominence)) {
     if (selected.every((other) => Math.abs(other.x - point.x) > spacing)) selected.push(point);
     if (selected.length >= count) break;
@@ -122,8 +123,35 @@ export function isSpectrumTarget(config: SpectrumFitConfig, series: ResolvedSeri
     config.group === (series.mapping.groupCol >= 0 ? series.name : undefined);
 }
 
-export function activeSpectrumFits(chart: Pick<ChartConfig, 'spectrumFit' | 'spectrumFits'>): SpectrumFitConfig[] {
-  return chart.spectrumFits ?? (chart.spectrumFit ? [chart.spectrumFit] : []);
+export function activeSpectrumFits(chart: Pick<ChartConfig, 'spectrumFits'>): SpectrumFitConfig[] {
+  return chart.spectrumFits ?? [];
+}
+
+export function spectrumAdjustmentKey(chart: Pick<ChartConfig, 'spectralAxis'>, mapping: SeriesMapping): string {
+  return JSON.stringify([mapping.datasetId, mapping.xCol, mapping.yCol, mapping.groupCol,
+    mapping.normalization ?? 'none', chart.spectralAxis?.direction ?? null, chart.spectralAxis?.density ?? false]);
+}
+
+export function spectrumExtraParameter(shape: SpectrumShape) {
+  if (shape === 'logNormal') return 'skew';
+  if (shape === 'voigt') return 'lorentzWidth';
+  if (shape === 'splitGaussian') return 'rightWidth';
+}
+
+export function validSpectrumParameters(shape: SpectrumShape, count: number, value: unknown): value is SpectrumParameters {
+  const parameters = value as SpectrumParameters | undefined;
+  const peaks = parameters?.peaks;
+  const background = parameters?.background;
+  return Array.isArray(peaks) && peaks.length === count && !!background &&
+    Number.isFinite(background.intercept) && Number.isFinite(background.slope) && peaks.every((peak) => {
+      if (!peak || ![peak.center, peak.width, peak.height].every(Number.isFinite) || peak.width <= 0 || peak.height < 0) return false;
+      if (!spectrumExtraParameter(shape)) return true;
+      const extra = peak.extra;
+      if (extra === undefined || !Number.isFinite(extra)) return false;
+      if (shape === 'logNormal') return Math.abs(extra) < minLogNormalSkew ||
+        Number.isFinite(peak.width * Math.expm1(Math.abs(extra) * Math.sqrt(2 * Math.LN2)) / Math.abs(extra));
+      return shape === 'voigt' ? extra >= 0 : extra > 0;
+    });
 }
 
 function profile(shape: SpectrumShape, center: number, width: number, extra: number) {
@@ -135,7 +163,7 @@ function profile(shape: SpectrumShape, center: number, width: number, extra: num
   if (shape === 'logNormal') return (x: number) => {
     // Width is the local Gaussian scale at the mode, and extra is signed skew.
     const z = (x - center) / width;
-    if (Math.abs(extra) < 1e-8) return Math.exp(-0.5 * z ** 2);
+    if (Math.abs(extra) < minLogNormalSkew) return Math.exp(-0.5 * z ** 2);
     const shifted = extra * z;
     return shifted <= -1 ? 0 : Math.exp(-0.5 * (Math.log1p(shifted) / extra) ** 2);
   };
@@ -151,7 +179,7 @@ function halfWidths(shape: SpectrumShape, fn: (x: number) => number, center: num
   if (shape === 'lorentzian') return [width, width];
   if (shape === 'splitGaussian') return [width * gaussianHalf, extra * gaussianHalf];
   if (shape === 'logNormal') {
-    if (Math.abs(extra) < 1e-8) return [width * gaussianHalf, width * gaussianHalf];
+    if (Math.abs(extra) < minLogNormalSkew) return [width * gaussianHalf, width * gaussianHalf];
     return [-width * Math.expm1(-extra * gaussianHalf) / extra, width * Math.expm1(extra * gaussianHalf) / extra];
   }
   let low = 0;
@@ -165,22 +193,64 @@ function halfWidths(shape: SpectrumShape, fn: (x: number) => number, center: num
   return [half, half];
 }
 
-function fitSpectrum(points: Point[], config: SpectrumFitConfig, yLog: boolean): SpectrumResult {
+function renderSpectrum(points: Point[], shape: SpectrumShape, parameters: SpectrumParameters, yLog: boolean,
+  low: number, yScale: number, backgroundAt?: (x: number) => number): SpectrumResult {
+  const { peaks, background } = parameters;
+  const origin = points[0].x;
+  const end = points[points.length - 1].x;
+  const components = peaks.map((peak) => profile(shape, peak.center, peak.width, peak.extra ?? 0));
+  const totalAt = (x: number) => components.reduce((sum, fn, index) => sum + peaks[index].height * fn(x),
+    backgroundAt ? backgroundAt(x) : background.intercept + background.slope * x);
+  const grid = [...new Set([
+    ...Array.from({ length: 481 }, (_, index) => origin + (end - origin) * (index / 480)),
+    ...peaks.map(({ center }) => center).filter((center) => center >= origin && center <= end),
+  ])].sort((a, b) => a - b);
+  const render = (values: (x: number) => number): Coordinates => grid.map((x) => {
+    const y = values(x);
+    return [x, Number.isFinite(y) && (!yLog || y > 0) ? y : null];
+  });
+  const residuals = fitResiduals(points, ({ x }) => totalAt(x));
+  if (residuals.length !== points.length) return { error: 'failed' };
+  const mean = points.reduce((sum, { y }) => sum + ((y - low) / yScale) / points.length, 0);
+  const variation = points.reduce((sum, { y }) => sum + ((y - low) / yScale - mean) ** 2, 0);
+  const error = residuals.reduce((sum, [, difference]) => sum + (difference / yScale) ** 2, 0);
+  if (!Number.isFinite(error / variation)) return { error: 'failed' };
+  return {
+    peaks: peaks.map((peak, index) => {
+      const { center, width, extra = 0, height } = peak;
+      const fn = components[index];
+      const [left, right] = halfWidths(shape, fn, center, width, extra);
+      const shift = shape === 'logNormal' && Math.abs(extra) >= minLogNormalSkew ? center - width / extra : undefined;
+      return { ...peak, fwhm: left + right, points: render((x) => fn(x) * height),
+        shift: Number.isFinite(shift) ? shift : undefined };
+    }).sort((a, b) => a.center - b.center),
+    total: render(totalAt), residuals, r2: 1 - error / variation, count: points.length, background,
+  };
+}
+
+export function fitSpectrum(points: Point[], config: SpectrumFitConfig, yLog: boolean, adjusted?: SpectrumParameters): SpectrumResult {
   const { shape, count, centers, baseline = 'linear' } = config;
   const dimensions = shape === 'gaussian' || shape === 'lorentzian' ? 2 : 3;
   const backgroundColumns = baseline === 'linear' ? 2 : baseline === 'constant' ? 1 : 0;
   if (!spectrumShapes.includes(shape) || !Number.isInteger(count) || count < 1 || count > maxSpectrumPeaks) {
     return { error: 'failed' };
   }
-  if (points.length <= backgroundColumns + count * (dimensions + 1)) return { error: 'tooFew' };
+  if (points.length < 2 || (!adjusted && points.length <= backgroundColumns + count * (dimensions + 1))) return { error: 'tooFew' };
   const origin = points[0].x;
   const span = points[points.length - 1].x - origin;
   if (!(span > 0 && Number.isFinite(span))) return { error: 'axis' };
-  if (centers && (centers.length !== count || new Set(centers).size !== count ||
+  if (!adjusted && centers && (centers.length !== count || new Set(centers).size !== count ||
     centers.some((x) => !Number.isFinite(x) || x <= origin || x >= origin + span))) return { error: 'centers' };
   const [low, high] = points.reduce(([min, max], { y }) => [Math.min(min, y), Math.max(max, y)], [Infinity, -Infinity]);
   const yScale = high - low;
   if (!(yScale > 0 && Number.isFinite(yScale))) return { error: 'failed' };
+  if (adjusted) {
+    if (!validSpectrumParameters(shape, count, adjusted)) return { error: 'parameters' };
+    const { intercept, slope } = adjusted.background;
+    return renderSpectrum(points, shape, { peaks: adjusted.peaks, background: {
+      intercept: baseline === 'zero' ? 0 : intercept, slope: baseline === 'linear' ? slope : 0,
+    } }, yLog, low, yScale);
+  }
   const reference = baseline === 'zero' ? 0 : low;
   // A constant background for nonnegative intensities must also be nonnegative.
   const backgroundFloor = baseline === 'constant' && low >= 0 ? -reference / yScale : undefined;
@@ -245,8 +315,7 @@ function fitSpectrum(points: Point[], config: SpectrumFitConfig, yLog: boolean):
     seed(secondary, 0.055 / Math.sqrt(count), 0.55),
     seed(asymmetric ? secondary : initial ?? uniform, 0.085 / Math.sqrt(count), -0.55),
   ];
-  const sample = normalized.length <= 640 ? normalized : Array.from({ length: 640 }, (_, index) =>
-    normalized[Math.round(index * (normalized.length - 1) / 639)]);
+  const sample = evenlySample(normalized, 640);
   const optimization = inputs(sample);
   const trial = fitFromSeeds(bounds, guesses, steps, (params) => solve(optimization, params));
   if (!trial) return { error: 'failed' };
@@ -254,49 +323,30 @@ function fitSpectrum(points: Point[], config: SpectrumFitConfig, yLog: boolean):
   const solution = sample === normalized ? trial : solve(full, trial.shape);
   if (!solution) return { error: 'failed' };
 
-  const params = trial.shape;
   const [offset = 0, slope = 0] = solution.coefficients.slice(0, backgroundColumns);
-  const heights = solution.coefficients.slice(backgroundColumns).map((height) => yScale * height);
-  const components = profiles(params);
-  const backgroundAt = (x: number) => reference + yScale * (offset + slope * x);
-  const totalAt = (x: number) => components.reduce((sum, fn, index) => sum + heights[index] * fn(x), backgroundAt(x));
-  const grid = [...new Set([
-    ...Array.from({ length: 481 }, (_, index) => index / 480),
-    ...params.filter((_, i) => i % dimensions === 0),
-  ])].sort((a, b) => a - b);
-  const render = (values: (x: number) => number): Coordinates => grid.map((x) => {
-    const value = values(x);
-    return [origin + x * span, !yLog || value > 0 ? value : null];
+  const backgroundSlope = yScale * slope / span;
+  const backgroundAt = (x: number) => reference + yScale * offset + backgroundSlope * (x - origin);
+  const peaks = solution.coefficients.slice(backgroundColumns).map((amplitude, index) => {
+    const [center, width, extra] = trial.shape.slice(index * dimensions, (index + 1) * dimensions);
+    return { center: origin + center * span, width: width * span, height: yScale * amplitude,
+      extra: shape === 'logNormal' || extra === undefined ? extra : extra * span };
   });
-  const mean = full.ys.reduce((sum, y) => sum + y / full.ys.length, 0);
-  const variation = full.ys.reduce((sum, y) => sum + (y - mean) ** 2, 0);
-  return {
-    peaks: components.map((fn, index) => {
-      const [center, width, extra = 0] = params.slice(index * dimensions, (index + 1) * dimensions);
-      const [left, right] = halfWidths(shape, fn, center, width, extra);
-      return {
-        center: origin + center * span, height: heights[index], centerY: heights[index],
-        fwhm: span * (left + right),
-        points: render((x) => fn(x) * heights[index]),
-      };
-    }).sort((a, b) => a.center - b.center),
-    total: render(totalAt),
-    residuals: fitResiduals(points, ({ x }) => totalAt((x - origin) / span)),
-    r2: 1 - solution.error / variation,
-    count: points.length,
-  };
+  return renderSpectrum(points, shape, {
+    peaks, background: { intercept: backgroundAt(0), slope: backgroundSlope },
+  }, yLog, low, yScale, backgroundAt);
 }
 
 export function calculateSpectrum(chart: ChartConfig, series: ResolvedSeries, config: SpectrumFitConfig): SpectrumResult {
   const view = spectrumView(chart, series);
-  const key = JSON.stringify([config.shape, config.count, config.centers, config.baseline]);
+  const adjusted = config.adjustments?.[spectrumAdjustmentKey(chart, series.mapping)];
+  const key = JSON.stringify([config.shape, config.count, config.centers, config.baseline, adjusted]);
   const fits = view.fits ??= new Map();
   const cached = fits.get(key);
   if (cached) return cached;
   const yAxis = series.mapping.y2 ? chart.y2Axis : chart.yAxis;
   const result = axisBounds(chart.xAxis).invalid || axisBounds(yAxis).invalid
     ? { error: 'axis' as const }
-    : fitSpectrum(view.points, config, yAxis.scale === 'log');
+    : fitSpectrum(view.points, config, yAxis.scale === 'log', adjusted);
   fits.set(key, result);
   const oldest = fits.keys().next().value;
   if (fits.size > 16 && oldest !== undefined) fits.delete(oldest);

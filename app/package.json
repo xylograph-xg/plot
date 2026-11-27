@@ -9,9 +9,12 @@
     "desktop": "npm run build && electron .",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "package:mac": "npm run build && electron-packager . '个人作图工具箱' --platform=darwin --arch=arm64 --app-bundle-id=com.plot-toolbox.local --out=../release --overwrite --asar --no-prune --ignore='^/(src|node_modules|public|examples|vite\\.config\\.ts|index\\.html|eslint\\.config\\.js|tsconfig[^/]*|package-lock\\.json|README\\.md)(/|$)' && codesign --force --deep --sign - '../release/个人作图工具箱-darwin-arm64/个人作图工具箱.app'"
+    "package:mac": "npm run build && electron-packager . '个人作图工具箱' --platform=darwin --arch=arm64 --app-bundle-id=com.plot-toolbox.local --out=../release --overwrite --asar --no-prune --ignore='^/(src|node_modules|public|examples|vite\\.config\\.ts|index\\.html|eslint\\.config\\.js|tsconfig[^/]*|package-lock\\.json|README\\.md)(/|$)' && codesign --force --deep --sign - '../release/个人作图工具箱-darwin-arm64/个人作图工具箱.app'",
+    "test": "vitest run",
+    "bench": "node examples/bench/generate.mjs && vitest bench --run --reporter=verbose"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.14.26",
     "echarts": "^6.1.0",
     "file-saver": "^2.0.5",
     "i18next": "^26.3.1",
@@ -22,7 +25,6 @@
     "react-i18next": "^17.0.8",
     "svg2pdf.js": "^2.7.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "zundo": "^2.3.0",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
@@ -43,7 +45,8 @@
     "tailwindcss": "^4.3.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "vitest": "^5.1.1"
   },
   "productName": "个人作图工具箱",
   "main": "desktop/main.cjs"

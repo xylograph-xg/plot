@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Reproducible performance fixtures
+/examples/bench/*.csv

@@ -1,4 +1,4 @@
-import { axisBounds } from '../../lib/axisBounds';
+import { AxisBoundsError, AxisBoundsFields } from './AxisBoundsFields';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store/useStore';
 import { PALETTES } from '../../lib/palettes';
@@ -61,7 +61,6 @@ function AxisEditor({
   onChange: (patch: Partial<AxisConfig>) => void;
 }) {
   const { t } = useTranslation();
-  const { invalid } = axisBounds(axis);
   return (
     <div role="group" aria-label={title} className="rounded-lg p-2 space-y-2" style={{ background: 'var(--bg-subtle)' }}>
       <div className="text-[11px] font-semibold" style={{ color: 'var(--text-1)' }}>
@@ -83,30 +82,9 @@ function AxisEditor({
             <option value="log">{t('style.log')}</option>
           </select>
         </div>
-        <div>
-          <span className="label">{t('style.min')}</span>
-          <input
-            className="input"
-            placeholder={t('style.auto')}
-            aria-label={t('style.min')}
-            aria-invalid={invalid}
-            value={axis.min}
-            onChange={(e) => onChange({ min: e.target.value })}
-          />
-        </div>
-        <div>
-          <span className="label">{t('style.max')}</span>
-          <input
-            className="input"
-            placeholder={t('style.auto')}
-            aria-label={t('style.max')}
-            aria-invalid={invalid}
-            value={axis.max}
-            onChange={(e) => onChange({ max: e.target.value })}
-          />
-        </div>
+        <AxisBoundsFields axis={axis} onChange={onChange} />
       </div>
-      {invalid && <p role="alert" className="text-[11px] text-red-500">{t('style.invalidBounds')}</p>}
+      <AxisBoundsError axis={axis} />
       <div className="grid grid-cols-2 gap-2">
         <div>
           <span className="label">{t('style.tickFormat')}</span>
@@ -180,7 +158,7 @@ export function StyleTab() {
               style={{ background: th.background, borderColor: th.gridColor }}
             />
             <span className="text-[10.5px] truncate" style={{ color: 'var(--text-2)' }}>
-              {th.name}
+              {t(`presetNames.themes.${th.id}`, { defaultValue: th.name })}
             </span>
           </button>
         ))}
@@ -207,7 +185,7 @@ export function StyleTab() {
               ))}
             </div>
             <span className="text-[10.5px] truncate" style={{ color: 'var(--text-2)' }}>
-              {p.name}
+              {t(`presetNames.palettes.${p.id}`, { defaultValue: p.name })}
             </span>
           </button>
         ))}

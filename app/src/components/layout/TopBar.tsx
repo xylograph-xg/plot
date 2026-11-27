@@ -1,20 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useStoreWithEqualityFn } from 'zustand/traditional';
+import { useStore as useZustandStore } from 'zustand';
+import { isEditableTarget, languageStorageKey, themeStorageKey } from '../../lib/preferences';
 import { useStore } from '../../store/useStore';
 
 function useUndoRedo() {
   const temporal = useStore.temporal;
-  const { pastStates, futureStates } = useStoreWithEqualityFn(
-    temporal,
-    (s) => ({ pastStates: s.pastStates, futureStates: s.futureStates }),
-    (a, b) => a.pastStates.length === b.pastStates.length && a.futureStates.length === b.futureStates.length,
-  );
+  const canUndo = useZustandStore(temporal, (state) => state.pastStates.length > 0);
+  const canRedo = useZustandStore(temporal, (state) => state.futureStates.length > 0);
   return {
-    canUndo: pastStates.length > 0,
-    canRedo: futureStates.length > 0,
-    undo: () => temporal.getState().undo(),
-    redo: () => temporal.getState().redo(),
+    canUndo,
+    canRedo,
+    undo: temporal.undo,
+    redo: temporal.redo,
   };
 }
 
@@ -22,20 +20,20 @@ export function TopBar() {
   const { t, i18n } = useTranslation();
   const mode = useStore((s) => s.mode);
   const setMode = useStore((s) => s.setMode);
-  const [dark, setDark] = useState(() => localStorage.getItem('sciplot-theme') === 'dark');
+  const [dark, setDark] = useState(() => localStorage.getItem(themeStorageKey) === 'dark');
   const { canUndo, canRedo, undo, redo } = useUndoRedo();
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
-    localStorage.setItem('sciplot-theme', dark ? 'dark' : 'light');
+    localStorage.setItem(themeStorageKey, dark ? 'dark' : 'light');
   }, [dark]);
 
   // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+      if (isEditableTarget(e.target)) return;
       if (e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) redo();
@@ -52,7 +50,7 @@ export function TopBar() {
   const toggleLang = () => {
     const next = i18n.language === 'zh' ? 'en' : 'zh';
     void i18n.changeLanguage(next);
-    localStorage.setItem('sciplot-lang', next);
+    localStorage.setItem(languageStorageKey, next);
   };
 
   return (
@@ -97,7 +95,7 @@ export function TopBar() {
       <div className="flex items-center gap-0.5 ml-2">
         <button
           className="tool-btn"
-          title={`${t('app.undo')} (Ctrl+Z)`}
+          title={`${t('app.undo')} (${mac ? '⌘Z' : 'Ctrl+Z'})`}
           disabled={!canUndo}
           style={{ opacity: canUndo ? 1 : 0.35 }}
           onClick={undo}
@@ -109,7 +107,7 @@ export function TopBar() {
         </button>
         <button
           className="tool-btn"
-          title={`${t('app.redo')} (Ctrl+Y)`}
+          title={`${t('app.redo')} (${mac ? '⌘⇧Z' : 'Ctrl+Y'})`}
           disabled={!canRedo}
           style={{ opacity: canRedo ? 1 : 0.35 }}
           onClick={redo}
@@ -123,10 +121,10 @@ export function TopBar() {
 
       <div className="flex-1" />
 
-      <button className="btn !px-2.5" onClick={toggleLang} title="中文 / English">
+      <button className="btn !px-2.5" onClick={toggleLang} title={t('app.language')}>
         {i18n.language === 'zh' ? 'EN' : '中'}
       </button>
-      <button className="btn !px-2.5" onClick={() => setDark(!dark)} title="Theme">
+      <button className="btn !px-2.5" onClick={() => setDark(!dark)} title={t('app.theme')}>
         {dark ? '☀' : '☾'}
       </button>
     </div>

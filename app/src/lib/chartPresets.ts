@@ -8,7 +8,7 @@ export const presetIds = ['scatter', 'decay', 'spectrum', 'ratio', 'arrhenius', 
 export type PresetId = typeof presetIds[number];
 
 const time = /^(?:延迟时间|延迟|时间|time|delay(?:start)?|t)(?:[(（]?(?:ns|[μµu]s|ms|s)[)）]?)?$/i;
-const wavelength = /^(?:波长|wavelength|lambda|λ)(?:[(（]?nm[)）]?)?$/i;
+const wavelength = /^(?:nm|(?:波长|wavelength|lambda|λ)(?:[(（]?nm[)）]?)?)$/i;
 const intensity = /^(?:counts(?:perbin)?|intensity|signal|每道计数|计数|强度|磷光强度)(?:[(（](?:a\.?u\.?|counts)[)）])?$/i;
 const ratio = /^(?:bluegreenratio|flashoverxenon|ratio)$/i;
 const temperatures = /^(?:ratio)?(\d+(?:\.\d+)?)k(?:\d+(?:\.\d+)?nm)?$/i;
@@ -22,11 +22,22 @@ interface Mapping {
   name?: string;
 }
 
+function looksLikeWavelengths(rows: Dataset['rows']): boolean {
+  const values = rows.flatMap(([value]) => typeof value === 'number' ? [value] : []);
+  const first = values[0];
+  const last = values.at(-1);
+  if (values.length < 3 || last === undefined || Math.min(first, last) < 200 || Math.max(first, last) > 2500) return false;
+  return values.every((value, index) => !index || (value - values[index - 1]) * Math.sign(last - first) > 0);
+}
+
 function mappingForDataset(preset: PresetId, dataset: Dataset) {
+  const headers = dataset.columns.map(numericName);
+  const unnamedWavelength = preset === 'spectrum' && /^col1$/i.test(headers[0] ?? '') &&
+    headers.filter((name) => !/^ratio/i.test(name) && temperatures.test(name)).length >= 2;
+  if (preset === 'spectrum' && !unnamedWavelength && !headers.some((name) => wavelength.test(name))) return;
   const view = datasetView(dataset);
   const numeric = numericColumnIndices(view);
-  const lookup = (pattern: RegExp) => numeric.find((index) => pattern.test(numericName(dataset.columns[index])));
-  const headers = dataset.columns.map(numericName);
+  const lookup = (pattern: RegExp) => numeric.find((index) => pattern.test(headers[index]));
   let xCol: number | undefined;
   let yCols: number[];
   let groupCol = -1;
@@ -43,15 +54,18 @@ function mappingForDataset(preset: PresetId, dataset: Dataset) {
     yLabel = /^lnratio$/i.test(headers[yCol]) ? 'ln R' : 'ln I';
     yCols = [yCol];
   } else {
-    xCol = lookup(preset === 'spectrum' ? wavelength : time);
-    if (xCol === undefined) return;
-    xLabel = dataset.columns[xCol].trim();
-    yLabel = preset === 'ratio' ? 'R' : '';
     const wide = numeric.flatMap((index) => {
       const match = temperatures.exec(headers[index]);
       return match && (preset === 'ratio' ? /^ratio/i.test(headers[index]) : !/^ratio/i.test(headers[index]))
         ? [{ index, temperature: Number(match[1]) }] : [];
     }).sort((left, right) => left.temperature - right.temperature);
+    xCol = lookup(preset === 'spectrum' ? wavelength : time);
+    const inferred = xCol === undefined && unnamedWavelength && numeric[0] === 0 && wide.length >= 2 &&
+      numeric.length === wide.length + 1 && looksLikeWavelengths(view.rows);
+    if (inferred) xCol = 0;
+    if (xCol === undefined) return;
+    xLabel = inferred ? 'λ (nm)' : dataset.columns[xCol].trim();
+    yLabel = preset === 'ratio' ? 'R' : '';
     if (wide.length) {
       yCols = wide.map(({ index }) => index);
       if (preset === 'spectrum') {
@@ -59,7 +73,7 @@ function mappingForDataset(preset: PresetId, dataset: Dataset) {
       }
     } else {
       const yCol = lookup(preset === 'ratio' ? ratio : intensity);
-      if (yCol === undefined) return;
+      if (yCol === undefined || yCol === xCol) return;
       yCols = [yCol];
       groupCol = headers.findIndex((name) => tempColumn.test(name));
     }
@@ -72,10 +86,11 @@ export function chartPreset(preset: PresetId, chart: ChartConfig, datasets: Data
   Partial<ChartConfig> | 'columns' | 'windows' | 'units' {
   const original = { ...chart, ...spectralAxisPatch(chart) };
   const scatter = preset === 'scatter' || preset === 'arrhenius';
+  const spectrum = preset === 'spectrum';
   const logarithmic = preset === 'decay' || preset === 'power';
   const fit = scatter ? 'linear' : preset === 'power' ? 'power' : 'none';
   const selectedFit = trendlineSelection(fit === 'none' ? [] : [fit]);
-  const normalization = preset === 'spectrum' ? 'peak' : 'none';
+  const normalization = spectrum ? 'max' : 'none';
   let { series } = chart;
   let xLabel = original.xAxis.label;
   let yLabel = original.yAxis.label;
@@ -112,16 +127,16 @@ export function chartPreset(preset: PresetId, chart: ChartConfig, datasets: Data
     series = series.map((item) => ({ ...item, ...selectedFit, normalization }));
   }
   const style: ChartStyle = {
-    ...chart.style, showSymbols: scatter, smooth: false, step: false, stack: false, showLegend: true,
+    ...chart.style, showSymbols: scatter || spectrum, smooth: false, step: false, stack: false, showLegend: true,
     palette: scatter ? 'okabe-ito' : 'temperature', legendPosition: scatter ? 'top' : 'right',
   };
   const axis = (current: ChartConfig['xAxis'], label: string, log: boolean) => ({
     ...current, label, scale: log ? 'log' as const : 'linear' as const, min: '', max: '',
   });
   return {
-    type: scatter ? 'scatter' : 'line', series, style,
-    showPeakPositions: preset === 'spectrum', spectrumFit: undefined, spectrumFits: [], spectralAxis: undefined,
-    xAxis: { ...axis(original.xAxis, xLabel, preset === 'power'), includeZero: preset !== 'spectrum' },
+    type: scatter || spectrum ? 'scatter' : 'line', series, style,
+    showPeakPositions: spectrum, showSpectrumSettings: spectrum, spectrumFits: [], spectralAxis: undefined,
+    xAxis: axis(original.xAxis, xLabel, preset === 'power'),
     yAxis: axis(original.yAxis, yLabel, logarithmic),
     y2Axis: scatter ? axis(original.y2Axis, original.y2Axis.label, false) : original.y2Axis,
   };

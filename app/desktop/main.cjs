@@ -1,6 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, net, protocol, screen } = require('electron');
 const { watch } = require('node:fs');
-const { link, readFile, readdir, realpath, rename, unlink, writeFile } = require('node:fs/promises');
+const { link, readFile, opendir, realpath, rename, unlink, writeFile } = require('node:fs/promises');
 const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -24,35 +24,46 @@ const fitWindows = new Map();
 
 const settingsPath = () => path.join(app.getPath('userData'), 'folder.json');
 
-async function scanFolder(root) {
+const scanLimits = { depth: 64, entries: 100_000, files: 10_000 };
+
+async function scanFolder(root, isCurrent) {
   const files = [];
-  const folders = [root];
+  const folders = [{ path: root, depth: 0 }];
   let skipped = 0;
-  while (folders.length) {
-    const folder = folders.pop();
-    let entries;
+  let visited = 0;
+  let limited = false;
+  search: while (folders.length && isCurrent()) {
+    const { path: folder, depth } = folders.pop();
     try {
-      entries = await readdir(folder, { withFileTypes: true });
+      const directory = await opendir(folder);
+      for await (const entry of directory) {
+        if (!isCurrent()) break search;
+        if (++visited > scanLimits.entries || files.length >= scanLimits.files) {
+          limited = true;
+          break search;
+        }
+        if (entry.name.startsWith('.') || entry.name.startsWith('~$')) continue;
+        const absolute = path.join(folder, entry.name);
+        if (entry.isDirectory()) {
+          if (depth < scanLimits.depth) folders.push({ path: absolute, depth: depth + 1 });
+          else limited = true;
+        } else if (entry.isFile() && extensions.has(path.extname(entry.name).toLowerCase())) {
+          const name = entry.name.toLowerCase();
+          const kind = name.endsWith(projectSuffix) || /^sciplot-project(?: \(\d+\))?\.json$/.test(name)
+            ? 'project' : 'data';
+          files.push({ id: path.relative(root, absolute), name: entry.name, kind });
+        }
+      }
     } catch (error) {
       if (folder === root || !['ENOENT', 'EACCES', 'EPERM'].includes(error.code)) throw error;
-      if (error.code !== 'ENOENT') skipped += 1;
-      continue;
-    }
-    for (const entry of entries) {
-      if (entry.name.startsWith('.') || entry.name.startsWith('~$')) continue;
-      const absolute = path.join(folder, entry.name);
-      if (entry.isDirectory()) {
-        folders.push(absolute);
-      } else if (entry.isFile() && extensions.has(path.extname(entry.name).toLowerCase())) {
-        const name = entry.name.toLowerCase();
-        const kind = name.endsWith(projectSuffix) || /^sciplot-project(?: \(\d+\))?\.json$/.test(name)
-          ? 'project' : 'data';
-        files.push({ id: path.relative(root, absolute), name: entry.name, kind });
+      if (error.code !== 'ENOENT') {
+        skipped += 1;
+        console.warn('Scan subfolder', error);
       }
     }
   }
   files.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-  return { root, files, skipped };
+  return { root, files, skipped, limited };
 }
 
 async function refreshFolder() {
@@ -61,8 +72,9 @@ async function refreshFolder() {
   if (!root) return snapshot;
   let next;
   try {
-    next = await scanFolder(root);
+    next = await scanFolder(root, () => version === scanVersion);
   } catch (error) {
+    console.error('Scan folder', error);
     next = { root, files: [], skipped: 0, error: error.message };
   }
   if (version === scanVersion) {
@@ -88,14 +100,15 @@ function watchFolder(root) {
       }
     });
     directoryWatcher = watcher;
-    watcher.on('error', () => {
+    watcher.on('error', (error) => {
       if (directoryWatcher !== watcher) return;
+      console.warn('Folder watcher', error);
       watcher.close();
       directoryWatcher = undefined;
       scheduleRefresh();
     });
-  } catch {
-    // The scan reports inaccessible directories, and users can retry with Refresh.
+  } catch (error) {
+    console.warn('Watch folder', error);
   }
   return refreshFolder();
 }
@@ -125,9 +138,18 @@ const webPreferences = {
   nodeIntegration: false,
 };
 
+function validFitData(data) {
+  return typeof data?.chart?.id === 'string' && Array.isArray(data.chart.series) &&
+    Array.isArray(data.datasets) && data.datasets.every((dataset) =>
+      typeof dataset?.id === 'string' && typeof dataset.name === 'string' &&
+      Array.isArray(dataset.columns) && dataset.columns.every((column) => typeof column === 'string') &&
+      Array.isArray(dataset.rows) && dataset.rows.every((row) => Array.isArray(row) && row.every((cell) =>
+        cell === null || typeof cell === 'string' || (typeof cell === 'number' && Number.isFinite(cell)))));
+}
+
 function attachFitHandlers() {
   fromApp('fit:open', (data, title) => {
-    if (typeof data?.chart?.id !== 'string' || !Array.isArray(data.datasets)) throw new Error('Invalid fit data');
+    if (!validFitData(data)) throw new Error('Invalid fit data');
     const bounds = window.getBounds();
     const work = screen.getDisplayMatching(bounds).workArea;
     const width = Math.min(900, work.width);
@@ -149,13 +171,20 @@ function attachFitHandlers() {
       if (window && !window.isDestroyed()) window.webContents.send('fit:closed', id);
     });
     view.once('ready-to-show', () => { if (!view.isDestroyed()) view.show(); });
-    void view.loadURL(url).catch(() => { if (!view.isDestroyed()) view.destroy(); });
+    void view.loadURL(url).catch((error) => {
+      console.error('Load fit window', error);
+      if (!view.isDestroyed()) view.destroy();
+    });
     return id;
   });
   ipcMain.on('fit:update', (event, id, data) => {
     if (!fromMainWindow(event)) return;
     const entry = fitWindows.get(id);
-    if (!entry || (data !== null && data?.chart?.id !== entry.chartId)) return;
+    if (!entry) return;
+    if (data !== null && (!validFitData(data) || data.chart.id !== entry.chartId)) {
+      console.warn('Rejected invalid fit window update');
+      return;
+    }
     entry.data = data;
     if (!entry.view.isDestroyed()) entry.view.webContents.send('fit:changed', data);
   });
@@ -214,7 +243,10 @@ function attachFolderHandlers() {
       throw new Error('Invalid project save request');
     }
     const candidate = path.resolve(root, directory);
-    const preferred = insideRoot(root, candidate) ? await realpath(candidate).catch(() => root) : root;
+    const preferred = insideRoot(root, candidate) ? await realpath(candidate).catch((error) => {
+      console.warn('Resolve save directory', error);
+      return root;
+    }) : root;
     const safeName = name.replace(/[\\/:\x00-\x1f]/g, '-').replace(/^\.+/, '').trim().slice(0, 64) || 'sciplot-project';
     const result = await dialog.showSaveDialog(window, {
       defaultPath: path.join(insideRoot(root, preferred) ? preferred : root, safeName + projectSuffix),
@@ -236,7 +268,9 @@ function attachFolderHandlers() {
       if (target === result.filePath) await rename(temporary, target);
       else await link(temporary, target);
     } finally {
-      await unlink(temporary).catch(() => {});
+      await unlink(temporary).catch((error) => {
+        if (error.code !== 'ENOENT') console.warn('Clean up project temporary file', error);
+      });
     }
     await refreshFolder();
     return relative;
@@ -262,7 +296,13 @@ function createWindow() {
 app.whenReady().then(async () => {
   protocol.handle('plot', (request) => {
     const url = new URL(request.url);
-    const resource = path.resolve(dist, '.' + decodeURIComponent(url.pathname));
+    let pathname;
+    try {
+      pathname = decodeURIComponent(url.pathname);
+    } catch {
+      return new Response('Invalid resource URL', { status: 400 });
+    }
+    const resource = path.resolve(dist, '.' + pathname);
     if (url.hostname !== 'app' || !resource.startsWith(dist + path.sep)) {
       return new Response('Not found', { status: 404 });
     }
@@ -274,14 +314,19 @@ app.whenReady().then(async () => {
   try {
     const settings = JSON.parse(await readFile(settingsPath(), 'utf8'));
     if (typeof settings.root === 'string' && path.isAbsolute(settings.root)) {
-      const root = await realpath(settings.root).catch(() => settings.root);
+      const root = await realpath(settings.root).catch((error) => {
+        console.warn('Resolve saved folder', error);
+        return settings.root;
+      });
       await watchFolder(root);
     }
-  } catch {
-    // First launch or a damaged setting. The window prompts for a folder.
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('Restore folder settings', error);
   }
-  app.on('activate', () => { if (!window) void createWindow(); });
-});
+  app.on('activate', () => {
+    if (!window) void createWindow().catch((error) => console.error('Open application window', error));
+  });
+}).catch((error) => console.error('Start application', error));
 
 app.on('before-quit', () => {
   clearTimeout(scanTimer);

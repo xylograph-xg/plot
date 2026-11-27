@@ -1,3 +1,19 @@
+export function evenlySample<T>(values: T[], limit: number): T[] {
+  if (values.length <= limit) return values;
+  return Array.from({ length: limit }, (_, index) =>
+    values[Math.round(index * (values.length - 1) / (limit - 1))]);
+}
+
+export function extent(values: Iterable<number>): [number, number] {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const value of values) {
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+  return [min, max];
+}
+
 /** Statistical helpers for box/violin/histogram/density/correlation charts. */
 
 export function quantile(sorted: number[], q: number): number {
@@ -72,8 +88,7 @@ export interface HistBin {
 
 export function histogram(values: number[], binCount: number): HistBin[] {
   if (values.length === 0) return [];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const [min, max] = extent(values);
   const span = max - min || 1;
   const width = span / binCount;
   const bins: HistBin[] = Array.from({ length: binCount }, (_, i) => ({
@@ -149,21 +164,26 @@ export function jitter(index: number): number {
   return (x - Math.floor(x)) * 2 - 1;
 }
 
-export function pearson(a: number[], b: number[]): number {
-  const n = Math.min(a.length, b.length);
-  if (n < 2) return NaN;
-  const ma = a.reduce((s, v) => s + v, 0) / n;
-  const mb = b.reduce((s, v) => s + v, 0) / n;
-  let num = 0;
-  let da = 0;
-  let db = 0;
-  for (let i = 0; i < n; i++) {
-    const xa = a[i] - ma;
-    const xb = b[i] - mb;
-    num += xa * xb;
-    da += xa * xa;
-    db += xb * xb;
+export function pearson(a: ArrayLike<number>, b: ArrayLike<number>): number {
+  let count = 0;
+  let meanA = 0;
+  let meanB = 0;
+  let sumAA = 0;
+  let sumBB = 0;
+  let sumAB = 0;
+  for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
+    const x = a[index];
+    const y = b[index];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    count += 1;
+    const deltaA = x - meanA;
+    const deltaB = y - meanB;
+    meanA += deltaA / count;
+    meanB += deltaB / count;
+    sumAA += deltaA * (x - meanA);
+    sumBB += deltaB * (y - meanB);
+    sumAB += deltaA * (y - meanB);
   }
-  const den = Math.sqrt(da * db);
-  return den === 0 ? 0 : num / den;
+  if (count < 2 || sumAA <= 0 || sumBB <= 0) return NaN;
+  return Math.min(1, Math.max(-1, sumAB / Math.sqrt(sumAA) / Math.sqrt(sumBB)));
 }

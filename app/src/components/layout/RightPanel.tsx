@@ -3,13 +3,11 @@ import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store/useStore';
 import { ChartTab } from '../panels/ChartTab';
 import { FitTab } from '../panels/FitTab';
-import { NormalizationTab } from '../panels/NormalizationTab';
 import { StyleTab } from '../panels/StyleTab';
 import { AnnotateTab } from '../panels/AnnotateTab';
 import { ExportTab } from '../panels/ExportTab';
-import { SpectralAxisTab } from '../panels/SpectralAxisTab';
 
-type TabId = 'chart' | 'fit' | 'normalize' | 'spectralAxis' | 'style' | 'annotate' | 'export';
+type TabId = 'chart' | 'fit' | 'style' | 'annotate' | 'export';
 
 export function RightPanel() {
   const { t } = useTranslation();
@@ -19,8 +17,6 @@ export function RightPanel() {
   const tabs: { id: TabId; label: string; chartOnly?: boolean }[] = [
     { id: 'chart', label: t('mode.chart'), chartOnly: true },
     { id: 'fit', label: t('fit.title'), chartOnly: true },
-    { id: 'normalize', label: t('normalization.title'), chartOnly: true },
-    { id: 'spectralAxis', label: t('spectralAxis.title'), chartOnly: true },
     { id: 'style', label: t('style.style'), chartOnly: true },
     { id: 'annotate', label: t('annotate.annotate') },
     { id: 'export', label: t('exportP.export') },
@@ -49,8 +45,6 @@ export function RightPanel() {
       <div className="flex-1 overflow-y-auto">
         {current === 'chart' && <ChartTab />}
         {current === 'fit' && <FitTab />}
-        {current === 'normalize' && <NormalizationTab />}
-        {current === 'spectralAxis' && <SpectralAxisTab />}
         {current === 'style' && <StyleTab />}
         {current === 'annotate' && <AnnotateTab />}
         {current === 'export' && <ExportTab />}

@@ -1,3 +1,4 @@
+import { languageStorageKey } from '../lib/preferences';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { zh } from './zh';
@@ -8,7 +9,7 @@ i18n.use(initReactI18next).init({
     zh: { translation: zh },
     en: { translation: en },
   },
-  lng: localStorage.getItem('sciplot-lang') ?? 'zh',
+  lng: localStorage.getItem(languageStorageKey) ?? 'zh',
   fallbackLng: 'en',
   interpolation: { escapeValue: false },
 });

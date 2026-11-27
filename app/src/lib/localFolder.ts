@@ -8,6 +8,7 @@ export interface FolderSnapshot {
   root: string | null;
   files: LocalFile[];
   skipped: number;
+  limited?: boolean;
   error?: string;
 }
 

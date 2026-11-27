@@ -1,3 +1,4 @@
+import { reportError } from './diagnostics';
 import type { AutoStartMode, ChartConfig, Dataset, SeriesMapping } from '../types';
 import { validPlateauPoints } from './autoStart';
 import { namedColumn } from './seriesDataset';
@@ -7,7 +8,7 @@ const storageKey = 'sciplot-default-chart-template';
 
 export interface ChartTemplate {
   version: 1;
-  chart: Pick<ChartConfig, 'type' | 'style' | 'xAxis' | 'yAxis' | 'y2Axis' | 'showPeakPositions'>;
+  chart: Pick<ChartConfig, 'type' | 'style' | 'xAxis' | 'yAxis' | 'y2Axis' | 'showPeakPositions' | 'showSpectrumSettings'>;
   columns: string[];
   series: Omit<SeriesMapping, 'id' | 'datasetId'>[];
   scanOnImport: boolean;
@@ -27,7 +28,8 @@ export function readChartTemplate(): ChartTemplate | null {
         (template.scanMode !== undefined && template.scanMode !== 'drop' && template.scanMode !== 'rise') ||
         (template.scanColumn !== undefined && typeof template.scanColumn !== 'string')) return null;
     return template;
-  } catch {
+  } catch (error) {
+    reportError('Read chart template', error);
     return null;
   }
 }
@@ -37,7 +39,8 @@ export function writeChartTemplate(template: ChartTemplate | null): boolean {
     if (template) window.localStorage.setItem(storageKey, JSON.stringify(template));
     else window.localStorage.removeItem(storageKey);
     return true;
-  } catch {
+  } catch (error) {
+    reportError('Write chart template', error);
     return false;
   }
 }
@@ -46,10 +49,10 @@ export function makeChartTemplate(
   chart: ChartConfig, datasets: Dataset[], scan: Pick<ChartTemplate, 'scanOnImport' | 'plateauPoints' | 'scanMode' | 'scanColumn'>,
 ): ChartTemplate {
   const primary = datasets.find((data) => data.id === chart.series[0]?.datasetId);
-  const { type, style, xAxis, yAxis, y2Axis, showPeakPositions } = { ...chart, ...spectralAxisPatch(chart) };
+  const { type, style, xAxis, yAxis, y2Axis, showPeakPositions, showSpectrumSettings } = { ...chart, ...spectralAxisPatch(chart) };
   return {
     version: 1,
-    chart: { type, style, xAxis, yAxis, y2Axis, showPeakPositions },
+    chart: { type, style, xAxis, yAxis, y2Axis, showPeakPositions, showSpectrumSettings },
     columns: primary?.columns ?? [],
     series: primary ? chart.series.filter((series) => series.datasetId === primary.id).map((series) => ({
       name: series.name, xCol: series.xCol, yCol: series.yCol, y2: series.y2,

@@ -1,16 +1,21 @@
+import { FitMethodSelect } from './FitMethodSelect';
+import { QuickAxis } from './AxisBoundsFields';
+import { panelLabel } from '../../lib/chartSources';
+import { SeriesEditor } from './SeriesEditor';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { rebindSeries } from '../../lib/seriesDataset';
 import { defaultSeries, useStore } from '../../store/useStore';
-import type { ActiveTrendlineKind, AutoStartMode, AxisConfig, ChartType, RowFilter, SeriesMapping } from '../../types';
+import type { ActiveTrendlineKind, AutoStartMode, ChartType, RowFilter } from '../../types';
 import { DefaultTemplate } from './DefaultTemplate';
-import { FitMethodSelect } from './FitMethodSelect';
 import { chartPreset, presetIds, type PresetId } from '../../lib/chartPresets';
-import { axisBounds } from '../../lib/axisBounds';
 import { supportsTrendline } from '../../lib/xySeries';
-import { defaultPlateauPoints, scanRowFilter, validPlateauPoints } from '../../lib/autoStart';
+import { spectralColumnUnit } from '../../lib/spectralAxis';
+import { defaultPlateauPoints, minPlateauPoints, maxPlateauPoints, scanRowFilter, validPlateauPoints } from '../../lib/autoStart';
 import { AutoStartSelect } from '../data/AutoStartSelect';
 import { SpectrumPanel } from './SpectrumPanel';
+import { NormalizationControls } from './NormalizationControls';
+import { SpectralAxisSettings } from './SpectralAxisSettings';
+import { CurveVisibility } from './CurveVisibility';
 import { selectedTrendlines, setTrendline, trendlineSelection } from '../../lib/trendlineSelection';
 
 const quickTypes = ['scatter', 'line', 'bar'] as const;
@@ -33,261 +38,6 @@ const CHART_TYPES: { type: ChartType; icon: string }[] = [
   { type: 'radar', icon: 'M12 3l8 6-3 9H7L4 9zM12 7l4 3-1.5 5h-5L8 10z' },
   { type: 'polar', icon: 'M12 12m-8 0a8 8 0 1016 0 8 8 0 10-16 0M12 12m-4 0a4 4 0 108 0 4 4 0 10-8 0M12 4v16' },
 ];
-
-function ColSelect({
-  value,
-  columns,
-  onChange,
-  allowNone,
-  noneLabel,
-}: {
-  value: number;
-  columns: string[];
-  onChange: (v: number) => void;
-  allowNone?: boolean;
-  noneLabel?: string;
-}) {
-  return (
-    <select className="input" value={value} onChange={(e) => onChange(Number(e.target.value))}>
-      {allowNone && <option value={-1}>{noneLabel ?? '—'}</option>}
-      {columns.map((c, i) => (
-        <option key={i} value={i}>
-          {c}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function SeriesEditor({ chartId, mapping }: { chartId: string; mapping: SeriesMapping }) {
-  const { t } = useTranslation();
-  const datasets = useStore((s) => s.datasets);
-  const updateSeries = useStore((s) => s.updateSeries);
-  const removeSeries = useStore((s) => s.removeSeries);
-  const duplicateSeries = useStore((s) => s.duplicateSeries);
-  const chart = useStore((s) => s.charts.find((c) => c.id === chartId));
-  const [showStyle, setShowStyle] = useState(false);
-  const ds = datasets.find((d) => d.id === mapping.datasetId);
-  if (!ds || !chart) return null;
-
-  const isDistribution = ['box', 'violin', 'histogram', 'density'].includes(chart.type);
-  const isMatrix = ['heatmap', 'correlation', 'radar'].includes(chart.type);
-  const isPie = chart.type === 'pie';
-  const isScatter = chart.type === 'scatter';
-  const isXY = ['line', 'scatter', 'area', 'polar'].includes(chart.type);
-  const patch = (p: Partial<SeriesMapping>) => updateSeries(chartId, mapping.id, p);
-
-  return (
-    <div className="rounded-lg p-2 space-y-2" style={{ background: 'var(--bg-subtle)' }}>
-      <div className="flex items-center gap-1.5">
-        <select
-          className="input flex-1"
-          aria-label={t('chart.dataset')}
-          value={mapping.datasetId}
-          onChange={(event) => {
-            const next = datasets.find((dataset) => dataset.id === event.target.value);
-            if (next) patch(rebindSeries(mapping, ds, next));
-          }}
-        >
-          {datasets.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
-        <button
-          className="text-[11px] px-1 shrink-0"
-          style={{ color: 'var(--text-3)' }}
-          title={t('chart.duplicateSeries')}
-          onClick={() => duplicateSeries(chartId, mapping.id)}
-        >
-          ⧉
-        </button>
-        <button
-          className="text-[11px] px-1 hover:text-red-500 shrink-0"
-          style={{ color: 'var(--text-3)' }}
-          onClick={() => removeSeries(chartId, mapping.id)}
-        >
-          ✕
-        </button>
-      </div>
-
-      {!isMatrix && (
-        <div className="grid grid-cols-2 gap-2">
-          {!isDistribution && (
-            <div>
-              <span className="label">{isPie ? t('chart.labelCol') : t('chart.xCol')}</span>
-              <ColSelect value={mapping.xCol} columns={ds.columns} onChange={(v) => patch({ xCol: v })}
-                allowNone={isXY || isPie} noneLabel={t('chart.rowIndex')} />
-            </div>
-          )}
-          <div>
-            <span className="label">{isDistribution || isPie ? t('chart.valueCol') : t('chart.yCol')}</span>
-            <ColSelect value={mapping.yCol} columns={ds.columns} onChange={(v) => patch({ yCol: v })} />
-          </div>
-          {!isDistribution && !isPie && (
-            <div>
-              <span className="label">{t('chart.errCol')}</span>
-              <ColSelect
-                value={mapping.errCol}
-                columns={ds.columns}
-                onChange={(v) => patch({ errCol: v })}
-                allowNone
-                noneLabel={t('chart.none')}
-              />
-            </div>
-          )}
-          {isScatter && (
-            <div>
-              <span className="label">{t('chart.sizeCol')}</span>
-              <ColSelect
-                value={mapping.sizeCol}
-                columns={ds.columns}
-                onChange={(v) => patch({ sizeCol: v })}
-                allowNone
-                noneLabel={t('chart.none')}
-              />
-            </div>
-          )}
-          <div>
-            <span className="label">{t('chart.groupCol')}</span>
-            <ColSelect
-              value={mapping.groupCol}
-              columns={ds.columns}
-              onChange={(v) => patch({ groupCol: v })}
-              allowNone
-              noneLabel={t('chart.none')}
-            />
-          </div>
-        </div>
-      )}
-
-      {!isMatrix && !isDistribution && !isPie && (
-        <>
-          <div>
-            <span className="label">{t('chart.seriesName')}</span>
-            <input
-              className="input"
-              value={mapping.name}
-              placeholder={ds.columns[mapping.yCol]}
-              onChange={(e) => patch({ name: e.target.value })}
-            />
-          </div>
-          <label className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-2)' }}>
-            <input type="checkbox" checked={mapping.y2} onChange={(e) => patch({ y2: e.target.checked })} />
-            {t('chart.secondY')}
-          </label>
-
-          {/* per-series style */}
-          <button
-            className="w-full text-left text-[11px] font-medium py-0.5"
-            style={{ color: 'var(--color-accent)' }}
-            onClick={() => setShowStyle(!showStyle)}
-          >
-            {showStyle ? '▾' : '▸'} {t('chart.seriesStyle')}
-          </button>
-          {showStyle && (
-            <div className="space-y-2 pl-1">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="label">{t('chart.color')}</span>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="color"
-                      className="w-7 h-6 rounded cursor-pointer border-0 bg-transparent"
-                      value={mapping.color || '#4f7cff'}
-                      onChange={(e) => patch({ color: e.target.value })}
-                    />
-                    <button className="btn !px-1.5 !py-0.5 text-[10px]" onClick={() => patch({ color: '' })}>
-                      {t('chart.auto')}
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <span className="label">{t('chart.opacity')} · {mapping.opacity}</span>
-                  <input
-                    type="range"
-                    className="w-full accent-(--color-accent)"
-                    min={0.1}
-                    max={1}
-                    step={0.05}
-                    value={mapping.opacity}
-                    onChange={(e) => patch({ opacity: Number(e.target.value) })}
-                  />
-                </div>
-                {isXY && (
-                  <div>
-                    <span className="label">{t('chart.lineStyle')}</span>
-                    <select
-                      className="input"
-                      value={mapping.lineStyle}
-                      onChange={(e) => patch({ lineStyle: e.target.value as SeriesMapping['lineStyle'] })}
-                    >
-                      <option value="solid">———</option>
-                      <option value="dashed">– – –</option>
-                      <option value="dotted">·····</option>
-                    </select>
-                  </div>
-                )}
-                {isXY && (
-                  <div>
-                    <span className="label">{t('chart.symbol')}</span>
-                    <select
-                      className="input"
-                      value={mapping.symbol}
-                      onChange={(e) => patch({ symbol: e.target.value as SeriesMapping['symbol'] })}
-                    >
-                      <option value="">{t('chart.auto')}</option>
-                      <option value="circle">●</option>
-                      <option value="emptyCircle">○</option>
-                      <option value="rect">■</option>
-                      <option value="triangle">▲</option>
-                      <option value="diamond">◆</option>
-                      <option value="none">{t('chart.none')}</option>
-                    </select>
-                  </div>
-                )}
-              </div>
-              {(chart.type === 'line' || chart.type === 'scatter' || chart.type === 'area') && mapping.errCol >= 0 && (
-                <div>
-                  <span className="label">{t('chart.errorDisplay')}</span>
-                  <select
-                    className="input"
-                    value={mapping.errorDisplay}
-                    onChange={(e) => patch({ errorDisplay: e.target.value as SeriesMapping['errorDisplay'] })}
-                  >
-                    <option value="bars">{t('chart.errBars')}</option>
-                    <option value="band">{t('chart.errBand')}</option>
-                  </select>
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function QuickAxis({ label, axis, onChange }: {
-  label: string;
-  axis: AxisConfig;
-  onChange(patch: Partial<AxisConfig>): void;
-}) {
-  const { t } = useTranslation();
-  const { invalid } = axisBounds(axis);
-  return (
-    <div role="group" aria-label={label} className="grid grid-cols-[2.6rem_1fr_1fr] items-center gap-1.5">
-      <span className="text-[11px] font-medium">{label}</span>
-      {(['min', 'max'] as const).map((field) => (
-        <input key={field} className="input min-w-0" aria-label={t(`style.${field}`)}
-          aria-invalid={invalid} placeholder={t(`style.${field}`)} value={axis[field]}
-          onChange={(event) => onChange({ [field]: event.target.value })} />
-      ))}
-      {invalid && <p role="alert" className="col-span-3 text-[11px] text-red-500">{t('style.invalidBounds')}</p>}
-    </div>
-  );
-}
 
 export function ChartTab() {
   const { t } = useTranslation();
@@ -314,6 +64,9 @@ export function ChartTab() {
 
   if (!chart) return null;
   const fitEnabled = supportsTrendline(chart.type) && chart.series.length > 0;
+  const xUnit = spectralColumnUnit(chart.xAxis.label);
+  const spectrumFirst = xUnit === 'nm' || xUnit === 'eV';
+  const spectrumPanel = fitEnabled && <SpectrumPanel key={chart.id} chart={chart} datasets={datasets} />;
   const activeFits = [...new Set(chart.series.flatMap(selectedTrendlines))];
   const toggleFit = (kind: ActiveTrendlineKind) => updateChart(chart.id, {
     series: chart.series.map((item) => ({
@@ -349,6 +102,7 @@ export function ChartTab() {
 
   return (
     <div className="space-y-1 pb-4">
+      {spectrumFirst && spectrumPanel}
       <div className="section-title">{t('quick.title')}</div>
       <div className="mx-3 space-y-2.5 rounded-lg border border-(--border) p-2.5">
         <div>
@@ -368,11 +122,11 @@ export function ChartTab() {
               <span className="label">{t('template.presetScan')}</span>
               <div className="flex gap-1.5">
                 <AutoStartSelect value={presetScan} onChange={setPresetScan} allowNone />
-                {presetScan && <input className="input !w-14" type="number" min={3} max={30}
+                {presetScan && <input className="input !w-14" type="number" min={minPlateauPoints} max={maxPlateauPoints}
                   aria-label={t('autoStart.plateauPoints')} title={t('autoStart.plateauPoints')}
                   value={plateauPoints} onChange={(event) => setPresetPoints(event.target.value)} />}
               </div>
-              {!validScan && <p role="alert" className="mt-1 text-[11px] text-red-500">{t('autoStart.invalidPoints')}</p>}
+              {!validScan && <p role="alert" className="mt-1 text-[11px] text-red-500">{t('autoStart.invalidPoints', { min: minPlateauPoints, max: maxPlateauPoints })}</p>}
             </div>
           )}
           {presetStatus?.chartId === chart.id && <p role="status" className="mt-1 text-[11px] text-(--text-2)">{presetStatus.message}</p>}
@@ -422,6 +176,11 @@ export function ChartTab() {
             favorites={quickFits} disabled={!fitEnabled} />
         </div>
 
+        {(fitEnabled || chart.type === 'bar' || chart.type === 'barh') &&
+          <CurveVisibility chart={chart} datasets={datasets} />}
+
+        {fitEnabled && <NormalizationControls chart={chart} datasets={datasets} />}
+
         <div className="space-y-1.5 border-t border-(--border) pt-2">
           <QuickAxis label={t('style.xAxis')} axis={chart.xAxis}
             onChange={(patch) => updateChart(chart.id, { xAxis: { ...chart.xAxis, ...patch } })} />
@@ -429,10 +188,11 @@ export function ChartTab() {
             onChange={(patch) => updateChart(chart.id, { yAxis: { ...chart.yAxis, ...patch } })} />
           {chart.series.some((item) => item.y2) && <QuickAxis label={t('style.y2Axis')} axis={chart.y2Axis}
             onChange={(patch) => updateChart(chart.id, { y2Axis: { ...chart.y2Axis, ...patch } })} />}
+          {fitEnabled && <SpectralAxisSettings key={chart.id} chart={chart} datasets={datasets} />}
         </div>
       </div>
 
-      {fitEnabled && <SpectrumPanel key={chart.id} chart={chart} datasets={datasets} />}
+      {!spectrumFirst && spectrumPanel}
 
       <div className="section-title">{t('chart.title')}</div>
       <div className="px-3 space-y-2">
@@ -487,7 +247,7 @@ export function ChartTab() {
               }
               onClick={() => setActiveChart(c.id)}
             >
-              {String.fromCharCode(65 + i)}
+              {panelLabel(i)}
             </button>
           ))}
           <button className="btn" onClick={addChart}>

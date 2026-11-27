@@ -1,5 +1,38 @@
 export const zh = {
-  app: { title: '个人作图工具箱', subtitle: '本地数据作图', undo: '撤销', redo: '重做' },
+  presetNames: {
+    themes: {
+      'publication': '出版',
+      'minimal': '极简',
+      'ggplot': 'ggplot2',
+      'seaborn': 'Seaborn',
+      'dark': '深色',
+    },
+    palettes: {
+      'okabe-ito': 'Okabe-Ito（色觉友好）',
+      'npg': 'NPG（Nature）',
+      'lancet': 'Lancet',
+      'jama': 'JAMA',
+      'viridis': 'Viridis（采样）',
+      'tab10': 'Tableau 10',
+      'temperature': '温度（Viridis）',
+      'grayscale': '灰度',
+    },
+    journals: {
+      'nature-1col': 'Nature · 单栏 (89 mm)',
+      'nature-2col': 'Nature · 双栏 (183 mm)',
+      'science-1col': 'Science · 单栏 (55 mm)',
+      'science-2col': 'Science · 双栏 (120 mm)',
+      'cell-1col': 'Cell · 单栏 (85 mm)',
+      'cell-2col': 'Cell · 双栏 (174 mm)',
+      'ieee-1col': 'IEEE · 单栏 (88 mm)',
+      'ieee-2col': 'IEEE · 双栏 (181 mm)',
+      'pnas-1col': 'PNAS · 单栏 (87 mm)',
+      'a4-full': 'A4 · 全宽 (170 mm)',
+    },
+  },
+  diagnostics: { crash: '应用运行出错', retry: '重试', details: '错误详情', dismiss: '关闭' },
+  app: {
+    language: '切换语言（中文 / English）', theme: '切换主题', title: '个人作图工具箱', subtitle: '本地数据作图', undo: '撤销', redo: '重做' },
   mode: { chart: '图表', canvas: '画布' },
   data: {
     addRow: '加行',
@@ -10,7 +43,12 @@ export const zh = {
     firstRowHeader: '首行为列名',
     skippedPreamble: '已跳过表首 {{count}} 行参数区',
   },
+  selection: {
+    tool: '框选数据', drag: '在绘图区拖出矩形选区', title: '框选区数据', curve: '曲线',
+    source: '源数据', clear: '清空选区', count: '{{count}} 个数据点', empty: '框选区内没有数据点',
+  },
   files: {
+    scanLimited: '目录扫描已达到上限。可连接更小的子目录。',
     merge: '合并曲线', mergeConfirm: '叠加为新图', mergeNeed: '先打开至少两张折线图、散点图或面积图。',
     overlayTitle: '合并图 {{index}}', reloadData: '重新读取',
     title: '文件', choose: '连接文件夹', change: '更换文件夹', refresh: '刷新',
@@ -32,11 +70,12 @@ export const zh = {
     types: '折线图、散点图和面积图支持归一化。',
     methodFor: '{{name}} 的归一化方法', unavailable: '有效数据不足或分母为零，无法绘制归一化曲线。',
     methods: {
-      none: '原始值', peak: '峰值 Y / 最大绝对值', first: '首点 Y / 第一个有效值',
+      none: '原始值', max: 'Y / Y 最大值', peak: 'Y / Y 最大绝对值', first: '首点 Y / 第一个有效值',
       minMax: '最小–最大缩放（0–1）', zScore: 'Z 分数（均值 0，标准差 1）',
     },
   },
   fit: {
+    calculating: '正在计算拟合…',
     residuals: '残差', residualHint: '残差 = 实测值 − 拟合值',
     none: '不拟合', addModel: '添加拟合模型',
     title: '拟合', types: '折线图、散点图和面积图支持拟合。', empty: '先为当前图表添加数据系列。',
@@ -77,10 +116,10 @@ export const zh = {
     detected: '{{column}} 从第 {{row}} 行开始 · {{mode}}',
     notFound: '未检测到模板指定的起始点。', beyondEnd: '检测到的起始行在当前末尾行之后。',
     dropNotFound: '未找到高位平台后的持续下降。', riseNotFound: '未找到近零基线后的突升点。',
-    invalidPoints: '平台点数须为 3–30 之间的整数。', missingColumn: '未匹配到模板的信号列。可在筛选行里选列后巡点。',
+    invalidPoints: '平台点数须为 {{min}}–{{max}} 之间的整数。', missingColumn: '未匹配到模板的信号列。可在筛选行里选列后巡点。',
   },
   filter: {
-    title: '筛选行', count: '选中 {{count}} / {{total}} 行',
+    title: '筛选行', count: '保留 {{count}} / {{total}} 行',
     first: '起始行号', last: '末尾行号',
     column: '条件列', none: '不限列值', operator: '比较方式', value: '条件值',
     equals: '等于', contains: '包含', gte: '大于等于', lte: '小于等于', empty: '为空',
@@ -94,7 +133,7 @@ export const zh = {
     fitShort: { linear: '线性', exponentialDecay: '单指数', doubleExponentialDecay: '双指数' },
     layoutAndDefaults: '拼版与自定义默认模板',
     presets: {
-      scatter: '散点与线性拟合', decay: '余辉衰减 · 半对数', spectrum: '磷光光谱 · 峰值归一',
+      scatter: '散点与线性拟合', decay: '余辉衰减 · 半对数', spectrum: '磷光光谱',
       ratio: '蓝绿比 · 延迟时间', arrhenius: 'Arrhenius · 线性拟合', power: '余辉衰减 · 双对数幂律',
     },
     errors: {
@@ -111,16 +150,25 @@ export const zh = {
     baseline: '基线', baselines: { constant: '常数基线', linear: '线性基线', zero: '固定零基线' },
     shapes: { gaussian: '高斯', lorentzian: '洛伦兹', voigt: 'Voigt 卷积', logNormal: '对数正态峰', splitGaussian: '双侧高斯峰' },
     short: { gaussian: '高斯', lorentzian: '洛伦兹', voigt: 'Voigt', logNormal: '对数正态', splitGaussian: '双侧高斯' },
-    centers: '初始峰位（可选）', centersHint: '例如 435, 515', energyCentersHint: '例如 2.41, 2.85',
-    centersError: '请按峰数填写初始峰位，用逗号或空格分隔。',
+    centers: '初始峰位', centerFor: '第 {{index}} 峰的初始峰位',
+    centersError: '请给每个峰填写一个数值，或全部留空使用自动峰位。',
     numericX: '需要数值横轴', update: '更新所选拟合', clear: '清除分峰', showComponents: '显示分峰曲线',
     total: '{{shape}} 总拟合', component: '分峰 {{index}}', peak: '峰', center: '峰位', height: '峰高',
+    logNormal: {
+      center: '拟合中心 x_c', shift: '偏移位置 x₀', width: '宽度 w', skew: '偏斜 s', amplitude: '峰高 A',
+    },
+    parameters: {
+      title: '拟合参数', edit: '调节参数', apply: '应用参数', reset: '恢复自动拟合', adjusted: '已手动调节',
+      intercept: '截距 b₀', slope: '斜率 b₁', skew: '偏斜 s', lorentzWidth: '洛伦兹半宽 γ',
+      leftWidth: '左侧宽度', rightWidth: '右侧宽度',
+    },
     resultHint: '{{count}} 个数据点 · {{baseline}}',
     errors: {
       tooFew: '当前范围内有效波长点过少。请扩大范围或减少峰数。',
       failed: '未找到有效的分峰。请调整峰数、范围或给出初始峰位。',
       centers: '初始峰位须互不重复，且位于有效数据的横轴范围内。',
       axis: '请检查横纵轴范围。',
+      parameters: '请检查参数。宽度须为正数，峰高和洛伦兹半宽须为非负数。',
     },
   },
   spectralAxis: {
@@ -143,7 +191,7 @@ export const zh = {
     duplicatePanel: '复制当前子图',
     delPanel: '删除当前子图',
     panelLabels: '显示面板标号 (A, B, C…)',
-    series: '数据系列',
+    series: '数据系列', visibleCurves: '显示数据组',
     addSeries: '添加系列',
     duplicateSeries: '复制系列',
     dataset: '数据集',
@@ -229,6 +277,7 @@ export const zh = {
     dblclickEdit: '双击文字可编辑',
   },
   exportP: {
+    figureError: '无法导出图形。', projectError: '无法打开工程。',
     residualsHint: '图上有残差时，同时导出纯图和带残差的图。',
     export: '导出',
     journal: '期刊尺寸预设',

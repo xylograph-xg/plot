@@ -1,7 +1,7 @@
 import type { NormalizationKind } from '../types';
 import type { ResolvedSeries } from './xySeries';
 
-export const normalizationKinds: NormalizationKind[] = ['none', 'peak', 'first', 'minMax', 'zScore'];
+export const normalizationKinds: NormalizationKind[] = ['none', 'max', 'peak', 'first', 'minMax', 'zScore'];
 
 export function normalizationTransform(
   kind: NormalizationKind, points: ResolvedSeries['points'],
@@ -12,6 +12,7 @@ export function normalizationTransform(
   let offset = 0;
   let scale = 1;
   switch (kind) {
+    case 'max': scale = max; break;
     case 'peak': scale = Math.max(Math.abs(min), Math.abs(max)); break;
     case 'first': scale = points[0].y; break;
     case 'minMax': offset = min; scale = max - min; break;
@@ -26,19 +27,29 @@ export function normalizationTransform(
 }
 
 const cache = new WeakMap<ResolvedSeries, ResolvedSeries>();
+const normalizedPoints = new WeakMap<ResolvedSeries['points'], Map<NormalizationKind, ResolvedSeries['points']>>();
 
 export function normalizedSeries(series: ResolvedSeries): ResolvedSeries {
   const kind = series.mapping.normalization ?? 'none';
   if (kind === 'none') return series;
   const existing = cache.get(series);
   if (existing) return existing;
-  const transform = normalizationTransform(kind, series.points);
-  const points = transform ? series.points.flatMap((point) => {
-    const y = (point.y - transform.offset) / transform.scale;
-    if (!Number.isFinite(y)) return [];
-    const err = point.err === undefined ? undefined : point.err / Math.abs(transform.scale);
-    return [{ ...point, y, err: Number.isFinite(err) ? err : undefined }];
-  }) : [];
+  let entries = normalizedPoints.get(series.points);
+  if (!entries) {
+    entries = new Map();
+    normalizedPoints.set(series.points, entries);
+  }
+  let points = entries.get(kind);
+  if (!points) {
+    const transform = normalizationTransform(kind, series.points);
+    points = transform ? series.points.flatMap((point) => {
+      const y = (point.y - transform.offset) / transform.scale;
+      if (!Number.isFinite(y)) return [];
+      const err = point.err === undefined ? undefined : point.err / Math.abs(transform.scale);
+      return [{ ...point, y, err: Number.isFinite(err) ? err : undefined }];
+    }) : [];
+    entries.set(kind, points);
+  }
   const result = { ...series, points };
   cache.set(series, result);
   return result;

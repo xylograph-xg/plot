@@ -1,21 +1,23 @@
+import { reportError } from '../../lib/diagnostics';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store/useStore';
-import { chartLabel, chartSources, commonSourceDirectory, datasetSource, pathParents } from '../../lib/chartSources';
+import { chartLabel, chartSources, commonSourceDirectory, datasetId, datasetSource, pathParents } from '../../lib/chartSources';
 import { parseProject } from '../../lib/export';
-import { datasetFromTable, inspectFile, type ImportTable } from '../../lib/parse';
+import { datasetFromTable, inspectFile, type ImportSheet, type ImportTable } from '../../lib/parse';
 import { workspaceTree, type FolderSnapshot, type LocalFile } from '../../lib/localFolder';
 import { visibleRowIndices } from '../../lib/rowFilter';
 import { supportsTrendline } from '../../lib/xySeries';
 import type { Dataset, ProjectFile } from '../../types';
-import { DataTable } from './DataTable';
 import { RowFilterEditor } from './RowFilterEditor';
+import { SelectionPanel } from './SelectionPanel';
 import { WorkspaceTree } from './WorkspaceTree';
 
 interface OpenFile {
   root: string;
   file: LocalFile;
-  tables: ImportTable[];
+  tables: ImportSheet[];
+  table?: Pick<ImportTable, 'fixedHeader' | 'skippedPreambleRows'>;
   sheet: number;
   header: boolean;
 }
@@ -61,12 +63,13 @@ function SourceList({ sources, root, files, onSource }: {
 }
 
 export function DataPanel() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const folder = window.localFolder;
   const datasets = useStore((state) => state.datasets);
   const dataset = useStore((state) => state.datasets.find((d) => d.id === state.activeDatasetId));
   const charts = useStore((state) => state.charts);
   const chart = useStore((state) => state.charts.find((c) => c.id === state.activeChartId));
+  const dataSelection = useStore((state) => state.dataSelection?.chartId === state.activeChartId ? state.dataSelection : null);
   const [snapshot, setSnapshot] = useState<FolderSnapshot>({ root: null, files: [], skipped: 0 });
   const [opened, setOpened] = useState<OpenFile | null>(null);
   const [selected, setSelected] = useState<'chart' | SavedFigure | null>(null);
@@ -80,7 +83,6 @@ export function DataPanel() {
   const [error, setError] = useState('');
   const request = useRef(0);
   const currentRoot = useRef<string | null>(null);
-  const parsedFiles = useRef(new Map<string, OpenFile>());
 
   useEffect(() => {
     if (!folder) return;
@@ -96,7 +98,6 @@ export function DataPanel() {
         setSelected(null);
         setMerging(false);
         setMergeIds(new Set());
-        parsedFiles.current.clear();
         setExpanded(new Set());
         setSearch('');
         setSavedPath('');
@@ -109,7 +110,10 @@ export function DataPanel() {
     });
     void folder.get().then((next) => {
       if (!receivedChange) loadSnapshot(next);
-    }).catch(() => { if (subscribed) setError(t('files.folderError')); });
+    }).catch((error) => {
+      reportError('Get folder', error);
+      if (subscribed) setError(t('files.folderError'));
+    });
     return () => {
       subscribed = false;
       unsubscribe();
@@ -154,27 +158,35 @@ export function DataPanel() {
   };
 
   const selectSheet = (source: OpenFile, index: number, reload = false) => {
-    const table = source.tables[index];
-    if (!table) return;
-    const id = JSON.stringify([source.root, source.file.id, table.name]);
+    const sheet = source.tables[index];
+    if (!sheet) return;
+    const id = datasetId(source.root, source.file.id, sheet.name);
     const state = useStore.getState();
     const existing = state.datasets.find((item) => {
       if (item.id === id) return true;
       const saved = item.source;
-      return table.sheet !== undefined && saved?.root === source.root && saved.fileId === source.file.id && saved.sheet === table.sheet;
+      return sheet.sheet !== undefined && saved?.root === source.root && saved.fileId === source.file.id && saved.sheet === sheet.sheet;
     });
-    if (existing && !reload) state.focusLocalDataset(existing.id);
-    else state.openLocalDataset({
-      ...datasetFromTable(table, existing?.id ?? id),
-      source: { root: source.root, fileId: source.file.id, sheet: table.sheet, firstRowHeader: source.header },
-    });
-    const next = { ...source, sheet: index };
-    parsedFiles.current.delete(source.file.id);
-    parsedFiles.current.set(source.file.id, next);
-    const oldest = parsedFiles.current.keys().next().value;
-    if (parsedFiles.current.size > 4 && oldest !== undefined) parsedFiles.current.delete(oldest);
-    setSelected(null);
-    setOpened(next);
+    try {
+      let table = index === source.sheet ? source.table : undefined;
+      if (!existing || reload || !table) {
+        const parsed = sheet.read();
+        table = { fixedHeader: parsed.fixedHeader, skippedPreambleRows: parsed.skippedPreambleRows };
+        if (!existing || reload) {
+          state.openLocalDataset({
+            ...datasetFromTable(parsed, existing?.id ?? id),
+            source: { root: source.root, fileId: source.file.id, sheet: sheet.sheet, firstRowHeader: source.header },
+          });
+        }
+      }
+      if (existing && !reload) state.focusLocalDataset(existing.id);
+      setError('');
+      setSelected(null);
+      setOpened({ ...source, sheet: index, table });
+    } catch (error) {
+      reportError('Read sheet', error);
+      setError(t('files.readError', { name: source.file.id }));
+    }
   };
 
   const openFile = async (file: LocalFile, options?: { reload: boolean; header?: boolean }) => {
@@ -182,7 +194,7 @@ export function DataPanel() {
     const root = snapshot.root;
     const version = ++request.current;
     setError('');
-    const cached = parsedFiles.current.get(file.id);
+    const cached = opened?.file.id === file.id && opened.root === root ? opened : undefined;
     if (cached && !options?.reload) {
       setLoading(null);
       selectSheet(cached, cached.sheet);
@@ -200,17 +212,18 @@ export function DataPanel() {
       }
       const storedSource = datasets.map(datasetSource).find((item) => item?.root === root && item.fileId === file.id);
       const header = options?.header ?? cached?.header ?? storedSource?.firstRowHeader ?? true;
-      const tables = await inspectFile(new File([bytes], file.name), header);
+      const tables = await inspectFile({ buffer: bytes, name: file.name }, header);
       if (version !== request.current) return;
       if (tables.length === 0) throw new Error('No worksheets');
       const preferredSheet = cached?.tables[cached.sheet]?.sheet ?? storedSource?.sheet;
-      const firstDataSheet = /^(?:说明|readme)$/i.test(tables[0].sheet ?? '')
-        ? tables.findIndex((table, index) => index > 0 && table.rows.some((row) =>
+      const firstDataSheet = preferredSheet === undefined && /^(?:说明|readme)$/i.test(tables[0].sheet ?? '')
+        ? tables.findIndex((table, index) => index > 0 && table.read().rows.some((row) =>
           row.filter((value) => typeof value === 'number').length >= 2)) : 0;
       const preferredIndex = tables.findIndex((table) => table.sheet === preferredSheet);
       const sheet = preferredIndex >= 0 ? preferredIndex : Math.max(0, firstDataSheet);
       selectSheet({ root, file, tables, sheet, header }, sheet, options?.reload);
-    } catch {
+    } catch (error) {
+      reportError('Read local file', error);
       if (version === request.current) setError(t('files.readError', { name: file.id }));
     } finally {
       if (version === request.current) setLoading(null);
@@ -229,9 +242,12 @@ export function DataPanel() {
   const mergeSelected = () => {
     const state = useStore.getState();
     let index = 1;
-    while (state.charts.some((item) => item.title === t('files.overlayTitle', { index }))) index += 1;
+    const usedNumbers = new Set(state.charts.map((item) => item.overlayIndex));
+    const usedTitles = new Set(state.charts.map((item) => item.title.trim()));
+    const languages = Object.keys(i18n.options.resources ?? {});
+    while (usedNumbers.has(index) || languages.some((lng) => usedTitles.has(t('files.overlayTitle', { index, lng })))) index += 1;
     const ids = mergeChoices.filter(({ id }) => mergeIds.has(id)).map(({ id }) => id);
-    if (state.mergeCharts(ids, t('files.overlayTitle', { index }))) {
+    if (state.mergeCharts(ids, t('files.overlayTitle', { index }), index)) {
       setMerging(false);
       setMergeIds(new Set());
       selectChart(useStore.getState().activeChartId);
@@ -253,7 +269,8 @@ export function DataPanel() {
     try {
       if (choose) await folder.choose();
       else await folder.refresh();
-    } catch {
+    } catch (error) {
+      reportError('Change folder', error);
       setError(t('files.folderError'));
     }
   };
@@ -274,7 +291,8 @@ export function DataPanel() {
         expandTo(path);
         setSavedPath(path);
       }
-    } catch {
+    } catch (error) {
+      reportError('Save local figure', error);
       setError(t('files.saveError'));
     } finally {
       setSaving(false);
@@ -302,6 +320,7 @@ export function DataPanel() {
               <div className="px-3 text-[11px] text-(--text-2)" aria-live="polite">
                 {t('files.count', { count: files.length })}
                 {snapshot.skipped > 0 && <div>{t('files.skipped', { count: snapshot.skipped })}</div>}
+                {snapshot.limited && <div role="status">{t('files.scanLimited')}</div>}
               </div>
             </>
           ) : <p className="px-3 text-[11px]">{t('files.hint')}</p>}
@@ -401,13 +420,13 @@ export function DataPanel() {
               {currentFile.tables.map(({ name, sheet }, index) => <option key={index} value={index}>{sheet ?? name}</option>)}
             </select>
           )}
-          {currentFile.tables[currentFile.sheet]?.skippedPreambleRows !== undefined && (
+          {currentFile.table?.skippedPreambleRows !== undefined && (
             <p role="status" className="text-[11px] text-(--text-2)">
-              {t('data.skippedPreamble', { count: currentFile.tables[currentFile.sheet].skippedPreambleRows })}
+              {t('data.skippedPreamble', { count: currentFile.table.skippedPreambleRows })}
             </p>
           )}
           <div className="flex items-center gap-1.5">
-            {!currentFile.tables[currentFile.sheet]?.fixedHeader && (
+            {!currentFile.table?.fixedHeader && (
               <label className="flex flex-1 items-center gap-1 text-[11px]">
                 <input type="checkbox" checked={currentFile.header}
                   onChange={(event) => void openFile(currentFile.file, { reload: true, header: event.target.checked })} />
@@ -420,12 +439,9 @@ export function DataPanel() {
           </div>
         </div>
       )}
-      {dataset && showDataset && (
-        <>
-          <RowFilterEditor key={'filter:' + dataset.id} dataset={dataset} count={rowIndices.length} />
-          <DataTable key={'table:' + dataset.id} dataset={dataset} rowIndices={rowIndices} />
-        </>
-      )}
+      {dataset && showDataset && <RowFilterEditor key={'filter:' + dataset.id} dataset={dataset} count={rowIndices.length} />}
+      {dataSelection && (!selected || selected === 'chart') &&
+        <SelectionPanel key={dataSelection.chartId} selection={dataSelection} datasets={datasets} />}
     </div>
   );
 }

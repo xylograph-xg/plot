@@ -2,4 +2,8 @@
 /references/
 .DS_Store
 
-/release/
+/release
+
+.env
+.env.*
+!.env.example

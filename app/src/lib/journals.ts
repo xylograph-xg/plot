@@ -13,7 +13,15 @@ export const JOURNAL_PRESETS: JournalPreset[] = [
   { id: 'a4-full', name: 'A4 · full width (170 mm)', widthMm: 170, heightMm: 130 },
 ];
 
-export const MM_TO_PX = 96 / 25.4; // CSS px per mm
+export const figureSizeLimits = { min: 30, max: 400 };
+
+export function millimetersToPixels(mm: number): number {
+  return Math.round(mm * 96 / 25.4);
+}
+
+export function validFigureDimension(mm: number): boolean {
+  return Number.isFinite(mm) && mm >= figureSizeLimits.min && mm <= figureSizeLimits.max;
+}
 
 export const FONT_OPTIONS = [
   'Arial',

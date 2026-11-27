@@ -1,3 +1,5 @@
+import { themeStorageKey } from '../../lib/preferences';
+import { reportError } from '../../lib/diagnostics';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { FitModelChoice, FitWindowData } from '../../lib/fitWindows';
@@ -31,7 +33,7 @@ export function FitWindow() {
   const [applying, setApplying] = useState(false);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', localStorage.getItem('sciplot-theme') === 'dark');
+    document.documentElement.classList.toggle('dark', localStorage.getItem(themeStorageKey) === 'dark');
     const bridge = window.fitWindows;
     if (!bridge) return;
     let mounted = true;
@@ -41,7 +43,10 @@ export function FitWindow() {
       setSource(data);
     });
     void bridge.get().then((data) => { if (mounted && !changed) setSource(data); })
-      .catch(() => { if (mounted && !changed) setSource(null); });
+      .catch((error) => {
+        reportError('Get fit window data', error);
+        if (mounted && !changed) setSource(null);
+      });
     return () => { mounted = false; receive(); };
   }, []);
 
@@ -87,7 +92,8 @@ export function FitWindow() {
         return next;
       });
       setStatus(ok ? 'applied' : 'failed');
-    } catch {
+    } catch (error) {
+      reportError('Apply fit models', error);
       setStatus('failed');
     } finally {
       setApplying(false);

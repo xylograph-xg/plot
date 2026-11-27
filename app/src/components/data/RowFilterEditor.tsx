@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AutoStartMode, Dataset, FilterOperator } from '../../types';
 import { useStore } from '../../store/useStore';
-import { defaultPlateauPoints, scanRowFilter, validPlateauPoints } from '../../lib/autoStart';
+import { defaultPlateauPoints, minPlateauPoints, maxPlateauPoints, scanRowFilter, validPlateauPoints } from '../../lib/autoStart';
 import { numericColumnIndices } from '../../lib/parse';
 import { AutoStartSelect } from './AutoStartSelect';
 
@@ -64,7 +64,7 @@ export function RowFilterEditor({ dataset, count }: { dataset: Dataset; count: n
         </div>
       )}
       {(scanError || importIssue) && <p role="status" className="py-1 text-[11px] text-(--text-2)">
-        {t(`autoStart.${scanError ?? importIssue}`)}
+        {t(`autoStart.${scanError ?? importIssue}`, { min: minPlateauPoints, max: maxPlateauPoints })}
       </p>}
       {open && (
         <form
@@ -83,7 +83,8 @@ export function RowFilterEditor({ dataset, count }: { dataset: Dataset; count: n
             const condition = columnInput !== '' ? { column, operator, value } : undefined;
             const needsNumber = operator === 'gte' || operator === 'lte';
 
-            if ((last !== undefined && first > last) ||
+            if (!Number.isSafeInteger(first) || first < 1 ||
+                (last !== undefined && (!Number.isSafeInteger(last) || first > last)) ||
                 (condition && operator !== 'empty' && (!value || (needsNumber && !Number.isFinite(Number(value)))))) {
               setError(true);
               return;
@@ -134,7 +135,7 @@ export function RowFilterEditor({ dataset, count }: { dataset: Dataset; count: n
             </label>
             <label>
               <span className="label">{t('autoStart.plateauPoints')}</span>
-              <input className="input" type="number" min={3} max={30} value={points}
+              <input className="input" type="number" min={minPlateauPoints} max={maxPlateauPoints} value={points}
                 onChange={(e) => setCustomPoints(e.target.value)} />
             </label>
           </div>

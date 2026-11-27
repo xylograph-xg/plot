@@ -1,3 +1,4 @@
+import { isEditableTarget } from '../../lib/preferences';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { Annotation, AnnotationKind, AnnotationStyle } from '../../types';
 import { useStore } from '../../store/useStore';
@@ -7,6 +8,8 @@ interface PanelLabel {
   x: number; // px
   y: number;
   label: string;
+  color: string;
+  fontSize: number;
 }
 
 interface Props {
@@ -53,9 +56,10 @@ export function AnnotationLayer({
   const [drag, setDrag] = useState<DragState>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const toLocal = useCallback((e: { clientX: number; clientY: number }): [number, number] => {
+  const toLocal = useCallback((e: { clientX: number; clientY: number }): [number, number] | undefined => {
     // Use the rendered rect so coordinates stay correct under CSS zoom
-    const r = svgRef.current!.getBoundingClientRect();
+    const r = svgRef.current?.getBoundingClientRect();
+    if (!r?.width || !r.height) return;
     return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
   }, []);
 
@@ -64,8 +68,7 @@ export function AnnotationLayer({
     if (!interactive) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId && !editingId) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+        if (isEditableTarget(e.target)) return;
         removeAnnotation(selectedId);
       }
     };
@@ -77,7 +80,9 @@ export function AnnotationLayer({
     if (!interactive || tool === 'select') return;
     e.preventDefault();
     (e.target as Element).setPointerCapture?.(e.pointerId);
-    const [x, y] = toLocal(e);
+    const point = toLocal(e);
+    if (!point) return;
+    const [x, y] = point;
     const kind = tool as AnnotationKind;
     if (kind === 'text') {
       const a: Annotation = {
@@ -97,14 +102,16 @@ export function AnnotationLayer({
       kind,
       points: kind === 'pen' ? [x, y] : [x, y, x, y],
       text: kind === 'sig' ? '*' : '',
-      style: { ...DEFAULT_STYLE, fill: kind === 'rect' || kind === 'ellipse' ? 'none' : 'none' },
+      style: { ...DEFAULT_STYLE, fill: 'none' },
     };
     setDrag({ kind: 'draw', annotation: a });
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (!drag) return;
-    const [x, y] = toLocal(e);
+    const point = toLocal(e);
+    if (!point) return;
+    const [x, y] = point;
     if (drag.kind === 'draw') {
       const a = drag.annotation;
       const points =
@@ -143,7 +150,9 @@ export function AnnotationLayer({
     e.stopPropagation();
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     selectAnnotation(a.id);
-    const [x, y] = toLocal(e);
+    const point = toLocal(e);
+    if (!point) return;
+    const [x, y] = point;
     setDrag({ kind: 'move', id: a.id, startPoints: [...a.points], startX: x, startY: y });
   };
 
@@ -180,10 +189,10 @@ export function AnnotationLayer({
             key={p.label}
             x={p.x}
             y={p.y}
-            fontSize={16}
+            fontSize={p.fontSize}
             fontWeight="bold"
             fontFamily={labelFont}
-            fill="#1a1d23"
+            fill={p.color}
           >
             {p.label}
           </text>
@@ -405,7 +414,7 @@ function Shape({ a, w, h, selected, selectable, onPointerDown, onDoubleClick, on
               width={80}
               height={s.fontSize + 8}
               fill="none"
-              stroke="#4f7cff"
+              stroke="var(--color-accent)"
               strokeWidth={1}
               strokeDasharray="3 3"
               pointerEvents="none"
@@ -418,7 +427,7 @@ function Shape({ a, w, h, selected, selectable, onPointerDown, onDoubleClick, on
               cy={px[pi + 1]}
               r={5}
               fill="#ffffff"
-              stroke="#4f7cff"
+              stroke="var(--color-accent)"
               strokeWidth={1.5}
               style={{ cursor: 'grab', pointerEvents: 'all' }}
               onPointerDown={(e) => onHandleDown?.(e, a.id, pi)}

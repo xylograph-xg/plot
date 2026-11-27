@@ -1,5 +1,38 @@
 export const en = {
-  app: { title: 'SciPlot', subtitle: 'Publication-Quality Plotting', undo: 'Undo', redo: 'Redo' },
+  presetNames: {
+    themes: {
+      'publication': 'Publication',
+      'minimal': 'Minimal',
+      'ggplot': 'ggplot2',
+      'seaborn': 'Seaborn',
+      'dark': 'Dark',
+    },
+    palettes: {
+      'okabe-ito': 'Okabe-Ito (colorblind safe)',
+      'npg': 'NPG (Nature)',
+      'lancet': 'Lancet',
+      'jama': 'JAMA',
+      'viridis': 'Viridis (sampled)',
+      'tab10': 'Tableau 10',
+      'temperature': 'Temperature (Viridis)',
+      'grayscale': 'Grayscale',
+    },
+    journals: {
+      'nature-1col': 'Nature · single column (89 mm)',
+      'nature-2col': 'Nature · double column (183 mm)',
+      'science-1col': 'Science · single column (55 mm)',
+      'science-2col': 'Science · double column (120 mm)',
+      'cell-1col': 'Cell · single column (85 mm)',
+      'cell-2col': 'Cell · double column (174 mm)',
+      'ieee-1col': 'IEEE · single column (88 mm)',
+      'ieee-2col': 'IEEE · double column (181 mm)',
+      'pnas-1col': 'PNAS · single column (87 mm)',
+      'a4-full': 'A4 · full width (170 mm)',
+    },
+  },
+  diagnostics: { crash: 'The application encountered an error', retry: 'Retry', details: 'Error details', dismiss: 'Dismiss' },
+  app: {
+    language: 'Switch language (中文 / English)', theme: 'Switch theme', title: 'SciPlot', subtitle: 'Publication-Quality Plotting', undo: 'Undo', redo: 'Redo' },
   mode: { chart: 'Charts', canvas: 'Canvas' },
   data: {
     addRow: 'Add Row',
@@ -10,7 +43,13 @@ export const en = {
     firstRowHeader: 'First row is header',
     skippedPreamble: 'Skipped {{count}} rows of instrument metadata',
   },
+  selection: {
+    tool: 'Box Select', drag: 'Drag a rectangle in the plot to select data', title: 'Selected data', curve: 'Series',
+    source: 'Source rows', clear: 'Clear selection', count_one: '{{count}} data point', count_other: '{{count}} data points',
+    empty: 'No data points in this selection',
+  },
   files: {
+    scanLimited: 'Folder scan reached its limit. Connect a smaller subfolder.',
     merge: 'Overlay curves', mergeConfirm: 'Create overlay', mergeNeed: 'Open at least two line, scatter, or area charts.',
     overlayTitle: 'Overlay {{index}}', reloadData: 'Reload data',
     title: 'Files', choose: 'Connect folder', change: 'Change folder', refresh: 'Refresh',
@@ -32,11 +71,12 @@ export const en = {
     types: 'Line, scatter, and area charts support normalization.',
     methodFor: 'Normalization for {{name}}', unavailable: 'No normalized curve is available. Check for missing data or a zero denominator.',
     methods: {
-      none: 'Original values', peak: 'Peak (Y / maximum absolute value)', first: 'First point (Y / first valid value)',
+      none: 'Original values', max: 'Y / maximum Y', peak: 'Y / maximum absolute Y', first: 'First point (Y / first valid value)',
       minMax: 'Min–max (0–1)', zScore: 'Z-score (mean 0, standard deviation 1)',
     },
   },
   fit: {
+    calculating: 'Calculating fit…',
     residuals: 'Residuals', residualHint: 'Residual = measured value − fitted value',
     none: 'No fit', addModel: 'Add fit model',
     title: 'Fit', types: 'Fitting is available for line, scatter, and area charts.', empty: 'Add a data series to the current chart.',
@@ -78,7 +118,7 @@ export const en = {
     detected: '{{column}} starts at row {{row}} · {{mode}}',
     notFound: 'The start specified by the template was not detected.', beyondEnd: 'The detected start is after the current last row.',
     dropNotFound: 'No sustained drop after a high plateau was detected.', riseNotFound: 'No jump from a near-zero baseline was detected.',
-    invalidPoints: 'Enter a plateau length of 3–30 points.', missingColumn: 'Template signal column missing. Choose a column in the row filter to scan.',
+    invalidPoints: 'Enter a plateau length of {{min}}–{{max}} points.', missingColumn: 'Template signal column missing. Choose a column in the row filter to scan.',
   },
   filter: {
     title: 'Filter rows', count: '{{count}} / {{total}} rows selected',
@@ -95,7 +135,7 @@ export const en = {
     fitShort: { linear: 'Linear', exponentialDecay: 'Exp.', doubleExponentialDecay: 'Double exp.' },
     layoutAndDefaults: 'Layout and custom defaults',
     presets: {
-      scatter: 'Scatter and linear fit', decay: 'Afterglow · Semi-log', spectrum: 'Spectrum · Peak normalized',
+      scatter: 'Scatter and linear fit', decay: 'Afterglow · Semi-log', spectrum: 'Phosphorescence spectrum',
       ratio: 'Blue/green ratio · Delay', arrhenius: 'Arrhenius · Linear fit', power: 'Afterglow · Log–log power law',
     },
     errors: {
@@ -112,16 +152,25 @@ export const en = {
     baseline: 'Baseline', baselines: { constant: 'Constant baseline', linear: 'Linear baseline', zero: 'Fixed zero baseline' },
     shapes: { gaussian: 'Gaussian', lorentzian: 'Lorentzian', voigt: 'Voigt convolution', logNormal: 'Log-normal peak', splitGaussian: 'Split Gaussian peak' },
     short: { gaussian: 'Gaussian', lorentzian: 'Lorentzian', voigt: 'Voigt', logNormal: 'Log-normal', splitGaussian: 'Split Gaussian' },
-    centers: 'Initial centers (optional)', centersHint: 'e.g. 435, 515', energyCentersHint: 'e.g. 2.41, 2.85',
-    centersError: 'Enter one initial center per peak, separated by commas or spaces.',
+    centers: 'Initial centers', centerFor: 'Initial center for peak {{index}}',
+    centersError: 'Enter a number for each peak, or leave all fields blank for automatic centers.',
     numericX: 'Numeric X required', update: 'Update fits', clear: 'Clear fits', showComponents: 'Show components',
     total: '{{shape}} sum', component: 'Peak {{index}}', peak: 'Peak', center: 'Center', height: 'Height',
+    logNormal: {
+      center: 'Fit center x_c', shift: 'Shift x₀', width: 'Width w', skew: 'Skew s', amplitude: 'Height A',
+    },
+    parameters: {
+      title: 'Fit parameters', edit: 'Adjust parameters', apply: 'Apply parameters', reset: 'Restore automatic fit', adjusted: 'Manually adjusted',
+      intercept: 'Intercept b₀', slope: 'Slope b₁', skew: 'Skew s', lorentzWidth: 'Lorentzian half-width γ',
+      leftWidth: 'Left width', rightWidth: 'Right width',
+    },
     resultHint: '{{count}} points · {{baseline}}',
     errors: {
       tooFew: 'Too few wavelengths in range. Widen the range or reduce the peak count.',
       failed: 'No valid fit was found. Change the peak count, range, or initial centers.',
       centers: 'Use distinct centers within the wavelength range of the included data.',
       axis: 'Check the axis limits.',
+      parameters: 'Check the parameters. Widths must be positive. The peak height and Lorentzian half-width must be nonnegative.',
     },
   },
   spectralAxis: {
@@ -144,7 +193,7 @@ export const en = {
     duplicatePanel: 'Duplicate Current Panel',
     delPanel: 'Remove Current Panel',
     panelLabels: 'Show panel labels (A, B, C…)',
-    series: 'Data Series',
+    series: 'Data Series', visibleCurves: 'Show data groups',
     addSeries: 'Add Series',
     duplicateSeries: 'Duplicate Series',
     dataset: 'Dataset',
@@ -230,6 +279,7 @@ export const en = {
     dblclickEdit: 'Double-click text to edit',
   },
   exportP: {
+    figureError: 'Could not export the figure.', projectError: 'Could not open the project.',
     residualsHint: 'Figures with residuals are saved with and without their residual plots.',
     export: 'Export',
     journal: 'Journal Size Preset',

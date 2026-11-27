@@ -1,17 +1,28 @@
 import type { ChartConfig, Dataset, DatasetSource } from '../types';
 
+export function datasetId(root: string, fileId: string, tableName: string): string {
+  return JSON.stringify([root, fileId, tableName]);
+}
+
+export function panelLabel(index: number): string {
+  return index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
+}
+
 export function datasetSource(dataset: Dataset): DatasetSource | undefined {
   const source = dataset.source;
   if (typeof source?.root === 'string' && typeof source.fileId === 'string') return source;
   // Projects saved before source metadata used the original file and sheet in the ID.
   if (typeof dataset.id !== 'string' || !dataset.id.startsWith('[')) return;
   try {
-    const [root, fileId, label] = JSON.parse(dataset.id);
+    const parts: unknown = JSON.parse(dataset.id);
+    if (!Array.isArray(parts)) return;
+    const [root, fileId, label] = parts;
     if (typeof root !== 'string' || typeof fileId !== 'string' || typeof label !== 'string') return;
     const base = fileId.split('/').at(-1)?.replace(/\.[^.]+$/, '') ?? '';
     const prefix = base + ' · ';
     return { root, fileId, sheet: label.startsWith(prefix) ? label.slice(prefix.length) : undefined };
-  } catch {
+  } catch (error) {
+    console.warn('Decode dataset ID', error);
     return undefined;
   }
 }
@@ -39,5 +50,5 @@ export function commonSourceDirectory(datasets: Dataset[], root: string | null):
 }
 
 export function chartLabel(chart: ChartConfig, index: number, fallback: (panel: string) => string): string {
-  return chart.title?.trim() || fallback(index < 26 ? String.fromCharCode(65 + index) : String(index + 1));
+  return chart.title?.trim() || fallback(panelLabel(index));
 }

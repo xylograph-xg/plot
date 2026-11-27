@@ -59,11 +59,21 @@ export type FitModelKind =
 export type TrendlineKind = 'none' | 'movingAverage' | FitModelKind;
 export type ActiveTrendlineKind = Exclude<TrendlineKind, 'none'>;
 export type ErrorDisplay = 'bars' | 'band';
-export type NormalizationKind = 'none' | 'peak' | 'first' | 'minMax' | 'zScore';
+export type NormalizationKind = 'none' | 'max' | 'peak' | 'first' | 'minMax' | 'zScore';
 
 export type SpectrumShape = 'gaussian' | 'lorentzian' | 'voigt' | 'logNormal' | 'splitGaussian';
 export type SpectrumBaseline = 'constant' | 'linear' | 'zero';
 export type SpectralAxisDirection = 'wavelengthToEnergy' | 'energyToWavelength';
+export interface SpectrumPeakParameters {
+  center: number;
+  width: number;
+  height: number;
+  extra?: number;
+}
+export interface SpectrumParameters {
+  peaks: SpectrumPeakParameters[];
+  background: { intercept: number; slope: number };
+}
 export interface SpectrumFitConfig {
   seriesId: string;
   group?: string;
@@ -71,6 +81,7 @@ export interface SpectrumFitConfig {
   baseline?: SpectrumBaseline;
   count: number;
   centers?: number[];
+  adjustments?: Record<string, SpectrumParameters>;
 }
 
 export interface SeriesMapping {
@@ -92,6 +103,8 @@ export interface SeriesMapping {
   trendlines?: ActiveTrendlineKind[];
   errorDisplay: ErrorDisplay;
   normalization?: NormalizationKind;
+  hidden?: boolean;
+  hiddenGroups?: string[];
 }
 
 export type AxisScale = 'linear' | 'log';
@@ -140,7 +153,7 @@ export interface ChartStyle {
   percentStack: boolean;
   barBorderRadius: number;
   histogramBins: number;
-  pieDonut: number; // 0 = pie, 0.3–0.7 = donut inner radius ratio
+  pieDonut: number; // 0 = pie, 0–0.8 controls the donut hole size
   pieShowLabels: boolean;
   showDataLabels: boolean;
   boxShowPoints: boolean; // jittered raw points over box/violin
@@ -149,6 +162,7 @@ export interface ChartStyle {
 export interface ChartConfig {
   id: string;
   fileDatasetId?: string | null;
+  overlayIndex?: number;
   type: ChartType;
   title: string;
   subtitle: string;
@@ -158,8 +172,8 @@ export interface ChartConfig {
   y2Axis: AxisConfig;
   style: ChartStyle;
   showPeakPositions?: boolean;
+  showSpectrumSettings?: boolean;
   showSpectrumComponents?: boolean;
-  spectrumFit?: SpectrumFitConfig;
   spectrumFits?: SpectrumFitConfig[];
   spectralAxis?: SpectralAxisConfig;
   spectralAxisPreference?: SpectralAxisPreference;
@@ -192,7 +206,7 @@ export interface Annotation {
   style: AnnotationStyle;
 }
 
-export type ToolId = 'select' | AnnotationKind;
+export type ToolId = 'select' | 'selectData' | AnnotationKind;
 
 export interface FigureLayout {
   rows: number;

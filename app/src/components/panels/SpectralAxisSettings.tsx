@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ChartConfig, Dataset, SpectralAxisDirection } from '../../types';
 import { useStore } from '../../store/useStore';
 import { spectralAxisPatch, spectralDirections } from '../../lib/spectralAxis';
-import { invalidSpectralSources, spectralAxisSources, supportsTrendline } from '../../lib/xySeries';
+import { invalidSpectralSources, spectralAxisSources } from '../../lib/xySeries';
 
-function ConversionSettings({ chart, datasets }: { chart: ChartConfig; datasets: Dataset[] }) {
+export function SpectralAxisSettings({ chart, datasets }: { chart: ChartConfig; datasets: Dataset[] }) {
   const { t } = useTranslation();
   const [chosenDirection, setDirection] = useState<SpectralAxisDirection | ''>();
   const [chosenDensity, setDensity] = useState<boolean>();
@@ -14,15 +14,17 @@ function ConversionSettings({ chart, datasets }: { chart: ChartConfig; datasets:
   const preference = chart.spectralAxisPreference ?? active;
   const density = chosenDensity ?? (preference?.direction === direction ? preference.density : false);
   const changed = direction !== (active?.direction ?? '') || (direction && density !== active?.density);
-  const sources = direction ? spectralAxisSources(chart, datasets) : [];
+  const { series } = chart;
+  const sources = useMemo(() => direction ? spectralAxisSources({ series }, datasets) : [], [direction, series, datasets]);
   const bad = direction ? invalidSpectralSources(sources, direction).map(({ column }) => column || t('chart.rowIndex')) : [];
   const skipped = sources.reduce((count, source) => count + source.skipped, 0);
 
   return (
-    <div className="space-y-3 p-3">
+    <details className="space-y-1.5">
+      <summary className="cursor-pointer text-[11px] text-(--text-2)">{t('spectralAxis.mode')}</summary>
       <label>
-        <span className="label">{t('spectralAxis.mode')}</span>
-        <select className="input" value={direction} onChange={(event) => setDirection(event.target.value as SpectralAxisDirection | '')}>
+        <select className="input" aria-label={t('spectralAxis.mode')} value={direction}
+          onChange={(event) => setDirection(event.target.value as SpectralAxisDirection | '')}>
           <option value="">{t('spectralAxis.original')}</option>
           {spectralDirections.map((item) => (
             <option key={item} value={item}>{t(`spectralAxis.directions.${item}`)}</option>
@@ -54,16 +56,6 @@ function ConversionSettings({ chart, datasets }: { chart: ChartConfig; datasets:
       {active && <p role="status" className="text-[11px] text-(--text-2)">
         {t(`spectralAxis.directions.${active.direction}`)} · {t(active.density ? 'spectralAxis.convertDensity' : 'spectralAxis.axisOnly')}
       </p>}
-    </div>
+    </details>
   );
-}
-
-export function SpectralAxisTab() {
-  const { t } = useTranslation();
-  const chart = useStore((state) => state.charts.find((item) => item.id === state.activeChartId));
-  const datasets = useStore((state) => state.datasets);
-  if (!chart || !supportsTrendline(chart.type) || !chart.series.length) {
-    return <p className="p-3 text-xs text-(--text-2)">{t('spectralAxis.needData')}</p>;
-  }
-  return <ConversionSettings key={chart.id} chart={chart} datasets={datasets} />;
 }

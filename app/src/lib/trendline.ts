@@ -1,11 +1,11 @@
 import type { AxisConfig, ChartConfig, TrendlineKind } from '../types';
 import { axisBounds } from './axisBounds';
 import { fitCurve, fitModels, inFitDomain, isFitModel, type CurveFit } from './fitModels';
-import { movingAverage } from './stats';
+import { evenlySample, movingAverage } from './stats';
 import type { ResolvedSeries } from './xySeries';
 import { fitResiduals, type ResidualPoint } from './residuals';
 
-interface TrendlineResult {
+export interface TrendlineResult {
   count: number;
   excluded: number;
   points: [number, number | null][];
@@ -76,7 +76,18 @@ function buildTrendline(
   const xs = numeric.map(({ x }) => x);
   const distinct = [...new Set(xs)].sort((a, b) => a - b);
   if (distinct.length < minimum) return { ...base, error: 'distinctX' };
-  const result = fitCurve(kind, xs, numeric.map(({ y }) => y));
+  const requiresSearch = model?.group !== 'polynomial' && model?.group !== 'transforms';
+  let optimization: { xs: number[]; ys: number[] } | undefined;
+  if (requiresSearch && count > 640) {
+    const ordered = [...numeric].sort((a, b) => a.x - b.x);
+    let sample = evenlySample(ordered, 640);
+    if (new Set(sample.map(({ x }) => x)).size < minimum) {
+      const unique = ordered.filter(({ x }, index) => index === 0 || x !== ordered[index - 1].x);
+      sample = [...evenlySample(ordered, 640 - minimum), ...evenlySample(unique, minimum)];
+    }
+    optimization = { xs: sample.map(({ x }) => x), ys: sample.map(({ y }) => y) };
+  }
+  const result = fitCurve(kind, xs, numeric.map(({ y }) => y), optimization);
   if (!result) return { ...base, error: 'failed' };
   const { predict, ...fit } = result;
   const sample = (x: number): [number, number | null] => {

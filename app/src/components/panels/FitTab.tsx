@@ -1,14 +1,16 @@
+import { reportError } from '../../lib/diagnostics';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fitModels, isFitModel } from '../../lib/fitModels';
 import { datasetView } from '../../lib/rowFilter';
 import { normalizedSeries } from '../../lib/normalization';
-import { calculateTrendline } from '../../lib/trendline';
-import { hasCategoricalX, resolveChartSeries, supportsTrendline } from '../../lib/xySeries';
+import { useFitResults } from '../chart/useFitResults';
+import { hasCategoricalX, isCurveVisible, resolveChartSeries, supportsTrendline } from '../../lib/xySeries';
 import { useStore } from '../../store/useStore';
+import type { TrendlineResult } from '../../lib/trendline';
 import { openFitWindow } from '../../lib/fitWindows';
 import { axisBounds } from '../../lib/axisBounds';
-import { fitNumber, linearEquation } from '../../lib/fitResultText';
+import { fitNumber, fitParameterNumber, linearEquation } from '../../lib/fitResultText';
 import type { ActiveTrendlineKind, ChartConfig, Dataset } from '../../types';
 import { selectedTrendlines, setTrendline, trendlineLabel, trendlineSelection } from '../../lib/trendlineSelection';
 
@@ -32,7 +34,10 @@ export function FitTab() {
         setOpenFailed(false);
         const name = chart.title.trim() || datasets.find((item) => item.id === chart.series[0]?.datasetId)?.name;
         void openFitWindow(chart.id, name ? `${t('fit.windowTitle')} · ${name}` : t('fit.windowTitle'))
-          .catch(() => setOpenFailed(true));
+          .catch((error) => {
+            reportError('Open fit window', error);
+            setOpenFailed(true);
+          });
       }}>{t('fit.openWindow')}</button>}
       {openFailed && <p role="alert" className="text-xs text-red-500">{t('fit.windowError')}</p>}
       <SpectrumPanel key={chart.id} chart={chart} datasets={datasets} />
@@ -50,8 +55,10 @@ export function FitControls({ chart, datasets, onModel, toolbar }: {
   const resolved = useMemo(() => {
     if (!chart || !supportsTrendline(chart.type)) return [];
     const views = datasets.filter((dataset) => chart.series.some((item) => item.datasetId === dataset.id)).map(datasetView);
-    return resolveChartSeries(chart, views);
+    return resolveChartSeries(chart, views).filter(isCurveVisible);
   }, [chart, datasets]);
+
+  const fitResults = useFitResults(chart, resolved);
 
   if (!chart || !supportsTrendline(chart.type)) {
     return <p className="p-3 text-xs text-(--text-2)">{t('fit.types')}</p>;
@@ -95,7 +102,8 @@ export function FitControls({ chart, datasets, onModel, toolbar }: {
                 {methods.length > 1 && <div className="font-medium">{t(trendlineLabel(kind))}</div>}
                 {!groups.length && <p>{t('fit.emptyPoints')}</p>}
                 {groups.map((group) => {
-                  const result = calculateTrendline(chart, normalizedSeries(group), kind);
+                  const result: TrendlineResult | undefined = fitResults.trendline(normalizedSeries(group), kind);
+                  if (!result) return <p key={group.sid} role="status">{t('fit.calculating')}</p>;
                   const fit = result.fit;
                   const domain = isFitModel(kind) ? fitModels[kind].domain : undefined;
                   return (
@@ -116,7 +124,7 @@ export function FitControls({ chart, datasets, onModel, toolbar }: {
                                 {fit.parameters.map(({ symbol, value }) => (
                                   <div key={symbol} className="wrap-anywhere">
                                     <dt className="inline">{symbol}</dt>
-                                    <dd className="inline"> = {fitNumber(value, symbol.startsWith('x') ? 15 : 9)}</dd>
+                                    <dd className="inline"> = {fitParameterNumber(symbol, value)}</dd>
                                   </div>
                                 ))}
                               </dl>

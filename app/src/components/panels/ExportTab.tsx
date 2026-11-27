@@ -1,7 +1,8 @@
+import { reportError } from '../../lib/diagnostics';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store/useStore';
-import { JOURNAL_PRESETS } from '../../lib/journals';
+import { JOURNAL_PRESETS, figureSizeLimits, validFigureDimension } from '../../lib/journals';
 import {
   downloadFigure,
   readProjectFile,
@@ -9,6 +10,24 @@ import {
 } from '../../lib/export';
 import { FIGURE_DOM_ID } from '../chart/ChartCanvas';
 import { CANVAS_DOM_ID } from '../freecanvas/FreeCanvas';
+
+function FigureDimensionField({ label, value, onChange }: { label: string; value: number; onChange(value: number): void }) {
+  const [draft, setDraft] = useState<string>();
+  const invalid = draft !== undefined && !validFigureDimension(Number(draft));
+  return (
+    <label>
+      <span className="label">{label}</span>
+      <input type="number" className="input" aria-invalid={invalid} value={draft ?? value}
+        min={figureSizeLimits.min} max={figureSizeLimits.max}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          if (draft !== undefined && !invalid) onChange(Number(draft));
+          setDraft(undefined);
+        }}
+        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
+    </label>
+  );
+}
 
 export function ExportTab() {
   const { t } = useTranslation();
@@ -23,6 +42,7 @@ export function ExportTab() {
 
   const [preset, setPreset] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<'figureError' | 'projectError'>();
   const projectInputRef = useRef<HTMLInputElement>(null);
 
   const targetEl = () =>
@@ -33,10 +53,12 @@ export function ExportTab() {
     const el = targetEl();
     if (!el || busy) return;
     setBusy(true);
+    setError(undefined);
     try {
       await fn(el);
     } catch (err) {
-      alert(String(err));
+      reportError('Export figure', err);
+      setError('figureError');
     } finally {
       setBusy(false);
     }
@@ -44,6 +66,7 @@ export function ExportTab() {
 
   return (
     <div className="space-y-1 pb-4">
+      {error && <p role="alert" className="px-3 text-xs text-red-500">{t(`exportP.${error}`)}</p>}
       <div className="section-title">{t('exportP.journal')}</div>
       <div className="px-3 space-y-2">
         <select
@@ -58,39 +81,15 @@ export function ExportTab() {
           <option value="">{t('exportP.custom')}</option>
           {JOURNAL_PRESETS.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name}
+              {t(`presetNames.journals.${p.id}`, { defaultValue: p.name })}
             </option>
           ))}
         </select>
         <div className="grid grid-cols-2 gap-2">
-          <div>
-            <span className="label">{t('exportP.width')}</span>
-            <input
-              type="number"
-              className="input"
-              value={figureWidthMm}
-              min={30}
-              max={400}
-              onChange={(e) => {
-                setPreset('');
-                setFigureSize(Number(e.target.value) || figureWidthMm, figureHeightMm);
-              }}
-            />
-          </div>
-          <div>
-            <span className="label">{t('exportP.height')}</span>
-            <input
-              type="number"
-              className="input"
-              value={figureHeightMm}
-              min={30}
-              max={400}
-              onChange={(e) => {
-                setPreset('');
-                setFigureSize(figureWidthMm, Number(e.target.value) || figureHeightMm);
-              }}
-            />
-          </div>
+          <FigureDimensionField label={t('exportP.width')} value={figureWidthMm}
+            onChange={(width) => { setPreset(''); setFigureSize(width, figureHeightMm); }} />
+          <FigureDimensionField label={t('exportP.height')} value={figureHeightMm}
+            onChange={(height) => { setPreset(''); setFigureSize(figureWidthMm, height); }} />
         </div>
       </div>
 
@@ -136,9 +135,11 @@ export function ExportTab() {
             e.target.value = '';
             if (!f) return;
             try {
+              setError(undefined);
               loadProject(await readProjectFile(f));
             } catch (err) {
-              alert(String(err));
+              reportError('Read project', err);
+              setError('projectError');
             }
           }}
         />

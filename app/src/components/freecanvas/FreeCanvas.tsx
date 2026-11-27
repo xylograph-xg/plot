@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store/useStore';
-import { MM_TO_PX } from '../../lib/journals';
+import { millimetersToPixels } from '../../lib/journals';
 import { AnnotationLayer } from '../annotate/AnnotationLayer';
 import { AnnotationToolbar } from '../annotate/AnnotationToolbar';
 
@@ -13,8 +13,8 @@ export function FreeCanvas() {
   const figureWidthMm = useStore((s) => s.figureWidthMm);
   const figureHeightMm = useStore((s) => s.figureHeightMm);
 
-  const W = Math.round(figureWidthMm * MM_TO_PX);
-  const H = Math.round(figureHeightMm * MM_TO_PX);
+  const W = millimetersToPixels(figureWidthMm);
+  const H = millimetersToPixels(figureHeightMm);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);

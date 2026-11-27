@@ -1,9 +1,10 @@
+import { chartSvgRenderers } from './chartSvg';
 import { saveAs } from 'file-saver';
 import type { ProjectFile } from '../types';
 import { validPlateauPoints } from './autoStart';
-import { maxSpectrumPeaks, spectrumBaselines, spectrumShapes } from './spectrum';
+import { maxSpectrumPeaks, spectrumBaselines, spectrumShapes, validSpectrumParameters } from './spectrum';
 import { spectralDirections } from './spectralAxis';
-import type { AxisConfig } from '../types';
+import type { AxisConfig, SpectrumFitConfig } from '../types';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -24,6 +25,8 @@ export function composeFigureSvg(figureEl: HTMLElement, withResiduals = true): S
   out.setAttribute('width', String(W));
   out.setAttribute('height', String(H));
   out.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const accent = getComputedStyle(figureEl).getPropertyValue('--color-accent').trim();
+  if (accent) out.style.setProperty('--color-accent', accent);
 
   const bg = document.createElementNS(SVG_NS, 'rect');
   bg.setAttribute('width', String(W));
@@ -31,8 +34,8 @@ export function composeFigureSvg(figureEl: HTMLElement, withResiduals = true): S
   bg.setAttribute('fill', '#ffffff');
   out.appendChild(bg);
 
-  const append = (svg: SVGSVGElement) => {
-    const r = svg.getBoundingClientRect();
+  const append = (svg: SVGSVGElement, anchor: Element = svg) => {
+    const r = anchor.getBoundingClientRect();
     const g = document.createElementNS(SVG_NS, 'g');
     g.setAttribute(
       'transform',
@@ -48,9 +51,10 @@ export function composeFigureSvg(figureEl: HTMLElement, withResiduals = true): S
     out.appendChild(g);
   };
 
-  figureEl
-    .querySelectorAll<SVGSVGElement>('[data-chart-panel] svg')
-    .forEach((svg) => append(svg));
+  for (const panel of figureEl.querySelectorAll<HTMLElement>('[data-chart-panel]')) {
+    const render = chartSvgRenderers.get(panel);
+    if (render) append(render(), panel);
+  }
   figureEl
     .querySelectorAll<SVGSVGElement>('svg[data-overlay]')
     .forEach((svg) => append(svg));
@@ -97,7 +101,25 @@ async function figurePng(svg: SVGSVGElement, dpi: number): Promise<Blob> {
   }
 }
 
+async function waitForFits(figure: HTMLElement) {
+  if (!figure.querySelector('[data-fit-pending]')) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error('Timed out while waiting for fits'));
+    }, 30_000);
+    const observer = new MutationObserver(() => {
+      if (figure.querySelector('[data-fit-pending]')) return;
+      clearTimeout(timer);
+      observer.disconnect();
+      requestAnimationFrame(() => resolve());
+    });
+    observer.observe(figure, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-fit-pending'] });
+  });
+}
+
 export async function downloadFigure(figureEl: HTMLElement, filename: string, dpi: number) {
+  await waitForFits(figureEl);
   const figures = [{ svg: composeFigureSvg(figureEl, false), name: filename }];
   if (figureEl.querySelector('svg[data-fit-residuals]')) {
     figures.push({ svg: composeFigureSvg(figureEl), name: `${filename}-residuals` });
@@ -131,13 +153,21 @@ export function parseProject(text: string): ProjectFile {
         (chart.series != null && (!Array.isArray(chart.series) || chart.series.some((series) => !series)))) {
       throw new Error('Invalid chart');
     }
-    const fits = chart.spectrumFits ?? (chart.spectrumFit ? [chart.spectrumFit] : []);
+    const legacy = chart as typeof chart & { spectrumFit?: SpectrumFitConfig };
+    const fits = chart.spectrumFits ?? (legacy.spectrumFit ? [legacy.spectrumFit] : []);
     if (!Array.isArray(fits) || fits.some((fit) => !fit || typeof fit.seriesId !== 'string' || (fit.group !== undefined && typeof fit.group !== 'string') ||
         (fit.baseline !== undefined && !spectrumBaselines.includes(fit.baseline)) ||
         !spectrumShapes.includes(fit.shape) || !Number.isInteger(fit.count) || fit.count < 1 || fit.count > maxSpectrumPeaks ||
         (fit.centers !== undefined && (!Array.isArray(fit.centers) ||
-          fit.centers.length !== fit.count || !fit.centers.every(Number.isFinite))))) {
+          fit.centers.length !== fit.count || !fit.centers.every(Number.isFinite))) ||
+        (fit.adjustments !== undefined && (!fit.adjustments || typeof fit.adjustments !== 'object' ||
+          Array.isArray(fit.adjustments) || Object.values(fit.adjustments).some((value) =>
+            !validSpectrumParameters(fit.shape, fit.count, value)))))) {
       throw new Error('Invalid spectrum fit');
+    }
+    if (legacy.spectrumFit !== undefined) {
+      chart.spectrumFits = fits;
+      delete legacy.spectrumFit;
     }
     const spectral = chart.spectralAxis;
     const validAxis = (axis?: Pick<AxisConfig, 'label' | 'min' | 'max'>) =>

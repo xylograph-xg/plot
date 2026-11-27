@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { defaultPlateauPoints, validPlateauPoints } from '../../lib/autoStart';
+import { defaultPlateauPoints, minPlateauPoints, maxPlateauPoints, validPlateauPoints } from '../../lib/autoStart';
 import { useStore } from '../../store/useStore';
 import type { AutoStartMode } from '../../types';
 import { AutoStartSelect } from '../data/AutoStartSelect';
@@ -67,7 +67,7 @@ export function DefaultTemplate({ chartId }: { chartId: string }) {
             </label>
             <label>
               <span className="label">{t('autoStart.plateauPoints')}</span>
-              <input className="input" type="number" min={3} max={30} value={plateauPoints}
+              <input className="input" type="number" min={minPlateauPoints} max={maxPlateauPoints} value={plateauPoints}
                 onChange={(event) => setPoints(event.target.value)} />
             </label>
           </div>

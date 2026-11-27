@@ -4,19 +4,27 @@ import type { ResolvedSeries } from './xySeries';
 
 export const hc = 1239.841984332; // eV·nm
 export const spectralDirections = ['wavelengthToEnergy', 'energyToWavelength'] as const;
+export type SpectralUnit = 'nm' | 'eV';
 const converted = new WeakMap<ResolvedSeries, Map<boolean, ResolvedSeries>>();
+const convertedPoints = new WeakMap<ResolvedSeries['points'], Map<boolean, ResolvedSeries['points']>>();
 
-export function spectralOutputUnit(direction: SpectralAxisDirection): 'eV' | 'nm' {
+export function spectralOutputUnit(direction: SpectralAxisDirection): SpectralUnit {
   return direction === 'wavelengthToEnergy' ? 'eV' : 'nm';
 }
 
-export function spectralColumnUnit(column: string): 'nm' | 'eV' | 'unsupported' | undefined {
+export function spectralColumnUnit(column: string): SpectralUnit | 'unsupported' | undefined {
   const key = column.trim().toLowerCase();
   if (/(?:^|[^a-z])(?:kev|mev|[µμu]m|pm|å|ns|ms|hz)(?:[^a-z]|$)|时间|延迟|(?:^|[^a-z])(?:time|delay)(?:[^a-z]|$)/i.test(key)) {
     return 'unsupported';
   }
   if (/wavelength|波长|lambda|λ|(?:^|[^a-z])nm(?:[^a-z]|$)/i.test(key)) return 'nm';
   if (/energy|能量|(?:^|[^a-z])ev(?:[^a-z]|$)/i.test(key)) return 'eV';
+}
+
+export function spectralSeriesUnit(chart: Pick<ChartConfig, 'xAxis' | 'spectralAxis'>, column?: string): SpectralUnit | undefined {
+  if (chart.spectralAxis) return spectralOutputUnit(chart.spectralAxis.direction);
+  const unit = spectralColumnUnit(column ?? '') ?? spectralColumnUnit(chart.xAxis.label);
+  return unit === 'unsupported' ? undefined : unit;
 }
 
 export function compatibleSpectralColumn(column: string, direction: SpectralAxisDirection): boolean {
@@ -33,15 +41,24 @@ export function convertSpectralSeries(series: ResolvedSeries, density: boolean):
   }
   const cached = entries.get(density);
   if (cached) return cached;
-  const points = series.points.flatMap((point) => {
-    if (typeof point.x !== 'number' || point.x <= 0) return [];
-    const x = hc / point.x;
-    const factor = density ? point.x / x : 1;
-    const y = point.y * factor;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
-    const err = point.err === undefined ? undefined : point.err * factor;
-    return [{ ...point, x, y, err: Number.isFinite(err) ? err : undefined }];
-  });
+  let transformations = convertedPoints.get(series.points);
+  if (!transformations) {
+    transformations = new Map();
+    convertedPoints.set(series.points, transformations);
+  }
+  let points = transformations.get(density);
+  if (!points) {
+    points = series.points.flatMap((point) => {
+      if (typeof point.x !== 'number' || point.x <= 0) return [];
+      const x = hc / point.x;
+      const factor = density ? point.x / x : 1;
+      const y = point.y * factor;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
+      const err = point.err === undefined ? undefined : point.err * factor;
+      return [{ ...point, x, y, err: Number.isFinite(err) ? err : undefined }];
+    });
+    transformations.set(density, points);
+  }
   const result = { ...series, points };
   entries.set(density, result);
   return result;
@@ -51,6 +68,14 @@ function reciprocalBound(value: string): string {
   const numeric = Number(value);
   const reciprocal = hc / numeric;
   return numeric > 0 && Number.isFinite(reciprocal) ? String(reciprocal) : '';
+}
+
+function equalBound(value: string, expected: string): boolean {
+  if (!value.trim() || !expected) return !value.trim() && !expected;
+  const actual = Number(value);
+  const target = Number(expected);
+  return Number.isFinite(actual) &&
+    Math.abs(actual - target) <= 8 * Number.EPSILON * Math.max(Math.abs(actual), Math.abs(target));
 }
 
 function axisText({ label, min, max }: AxisConfig) {
@@ -71,8 +96,8 @@ export function spectralAxisPatch(
     min: reciprocalBound(chart.xAxis.max), max: reciprocalBound(chart.xAxis.min),
   } : { min: chart.xAxis.min, max: chart.xAxis.max };
   if (old && !direction) {
-    if (chart.xAxis.max === reciprocalBound(savedX.min)) mappedX.min = savedX.min;
-    if (chart.xAxis.min === reciprocalBound(savedX.max)) mappedX.max = savedX.max;
+    if (equalBound(chart.xAxis.max, reciprocalBound(savedX.min))) mappedX.min = savedX.min;
+    if (equalBound(chart.xAxis.min, reciprocalBound(savedX.max))) mappedX.max = savedX.max;
   }
 
   const useDensity = Boolean(direction) && density;
@@ -104,6 +129,6 @@ export function spectralAxisPatch(
     },
     yAxis: yAxisPatch(chart.yAxis, savedY),
     y2Axis: yAxisPatch(chart.y2Axis, savedY2),
-    spectrumFit: undefined, spectrumFits,
+    spectrumFits,
   };
 }

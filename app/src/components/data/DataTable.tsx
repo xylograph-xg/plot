@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
+import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store/useStore';
 import { parseCell } from '../../lib/parse';
@@ -16,6 +17,26 @@ export function DataTable({ dataset, rowIndices }: { dataset: Dataset; rowIndice
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const [selectedCol, setSelectedCol] = useState<number | null>(null);
   const [sortState, setSortState] = useState<{ col: number; asc: boolean } | null>(null);
+  const [draft, setDraft] = useState<{ row: number; column: number; value: string } | null>(null);
+  const scroll = useRef<HTMLDivElement>(null);
+  const editingIndex = draft ? rowIndices.indexOf(draft.row) : -1;
+  // The virtualizer owns scroll state and intentionally returns a stable instance.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: rowIndices.length,
+    getScrollElement: () => scroll.current,
+    estimateSize: () => 26,
+    overscan: 5,
+    rangeExtractor: (range) => {
+      const indices = defaultRangeExtractor(range);
+      if (editingIndex < 0 || indices.includes(editingIndex)) return indices;
+      return [...indices, editingIndex].sort((a, b) => a - b);
+    },
+  });
+  const visibleRows = virtualizer.getVirtualItems();
+  const spacer = (height: number) => height > 0 && (
+    <tr aria-hidden="true"><td colSpan={dataset.columns.length + 1} style={{ height, padding: 0 }} /></tr>
+  );
 
   const commitCell = (row: number, col: number, raw: string) => {
     const value = parseCell(raw, dataset.textColumns?.includes(col));
@@ -60,8 +81,13 @@ export function DataTable({ dataset, rowIndices }: { dataset: Dataset; rowIndice
           </button>
         )}
       </div>
-      <div className="flex-1 overflow-auto px-1 pb-1">
-        <table className="border-collapse w-full text-[11px]">
+      <div ref={scroll} className="flex-1 overflow-auto px-1 pb-1">
+        <table className="table-fixed border-collapse w-full text-[11px]"
+          style={{ minWidth: 32 + dataset.columns.length * 64 }} aria-rowcount={rowIndices.length + 1}>
+          <colgroup>
+            <col style={{ width: 32 }} />
+            {dataset.columns.map((_, column) => <col key={column} />)}
+          </colgroup>
           <thead className="sticky top-0 z-10">
             <tr>
               <th
@@ -105,10 +131,14 @@ export function DataTable({ dataset, rowIndices }: { dataset: Dataset; rowIndice
             </tr>
           </thead>
           <tbody>
-            {rowIndices.map((ri) => (
-              <tr key={ri}>
+            {visibleRows.map((item, index) => {
+              const ri = rowIndices[item.index];
+              const previousEnd = visibleRows[index - 1]?.end ?? 0;
+              return <Fragment key={ri}>
+                {spacer(item.start - previousEnd)}
+                <tr style={{ height: item.size }} aria-rowindex={item.index + 2}>
                 <td
-                  className="px-1 py-0.5 text-center text-[10px] border cursor-pointer select-none"
+                  className="px-1 text-center text-[10px] border cursor-pointer select-none"
                   style={{
                     borderColor: 'var(--border)',
                     color: selectedRow === ri ? '#fff' : 'var(--text-3)',
@@ -126,17 +156,23 @@ export function DataTable({ dataset, rowIndices }: { dataset: Dataset; rowIndice
                         color: typeof cell === 'number' ? 'var(--text-1)' : 'var(--color-accent)',
                         textAlign: typeof cell === 'number' ? 'right' : 'left',
                       }}
-                      key={`${dataset.id}-${ri}-${ci}-${String(cell)}`}
-                      defaultValue={cell === null ? '' : String(cell)}
-                      onBlur={(e) => commitCell(ri, ci, e.target.value)}
+                      value={draft?.row === ri && draft.column === ci ? draft.value : String(cell ?? '')}
+                      onFocus={(event) => setDraft({ row: ri, column: ci, value: event.target.value })}
+                      onChange={(event) => setDraft({ row: ri, column: ci, value: event.target.value })}
+                      onBlur={(event) => {
+                        commitCell(ri, ci, event.target.value);
+                        setDraft(null);
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                       }}
                     />
                   </td>
                 ))}
-              </tr>
-            ))}
+                </tr>
+              </Fragment>;
+            })}
+            {spacer(virtualizer.getTotalSize() - (visibleRows.at(-1)?.end ?? 0))}
           </tbody>
         </table>
       </div>

@@ -275,7 +275,7 @@ function sinusoidal(data: FitData): FitEquation | undefined {
   const spacings = sorted.slice(1).map((x, index) => x - sorted[index]).sort((a, b) => a - b);
   const max = Math.min(32, 0.5 / spacings[Math.floor(spacings.length / 2)]);
   const tau = 2 * Math.PI;
-  const optimum = fitShape([{ min: 0.1, max, steps: Math.max(12, Math.ceil(max * 10)) }], ([cycles]) => {
+  const optimum = fitShape([{ min: 0.1, max, steps: Math.min(160, Math.max(12, Math.ceil(max * 10))) }], ([cycles]) => {
     const angles = data.x.map((x) => tau * cycles * x);
     return data.project([angles.map(Math.sin), angles.map(Math.cos)]);
   });
@@ -294,17 +294,19 @@ function sinusoidal(data: FitData): FitEquation | undefined {
   };
 }
 
-export function fitCurve(kind: FitModelKind, xs: number[], ys: number[]): CurveFit | undefined {
+export function fitCurve(
+  kind: FitModelKind, xs: number[], ys: number[], optimization?: { xs: number[]; ys: number[] },
+): CurveFit | undefined {
   if (xs.length !== ys.length || xs.length < fitModels[kind].minimum) return;
   const baseline = kind !== 'power' && kind !== 'exponential' && kind !== 'doubleExponential';
-  const data = makeFitData(xs, ys, baseline);
+  const data = makeFitData(optimization?.xs ?? xs, optimization?.ys ?? ys, baseline);
   if (!data) return;
   if (baseline && fitModels[kind].group !== 'polynomial' && fitModels[kind].group !== 'transforms' &&
       data.y.every((value) => value === 0)) return;
   const fit = (() => {
     switch (kind) {
       case 'linear': {
-        const linear = linearRegression(xs, data.y);
+        const linear = linearRegression(data.xs, data.y);
         if (!linear) return;
         return {
           equation: 'y = ax + b',

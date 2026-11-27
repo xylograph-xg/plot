@@ -12,20 +12,22 @@ export function chooseFitColor(source: string, rawColors: string[], used: Set<st
   const palette = dark ? onDark : onLight;
   const original = rgb(source);
   const distinct = (color: string) => {
-    const candidate = rgb(color)!;
+    const candidate = rgb(color);
+    if (!candidate) return false;
     return color !== source.toLowerCase() && (!original || candidate.some((value, channel) => value !== original[channel]));
   };
   const available = palette.filter(distinct);
   const avoid = new Set(rawColors.map((color) => rgb(color)?.join(':') ?? color.toLowerCase()));
   const unused = (color: string) => !used.has(color);
-  const candidates = available.filter((color) => unused(color) && !avoid.has(rgb(color)!.join(':')));
+  const candidates = available.filter((color) => unused(color) && !avoid.has(rgb(color)?.join(':') ?? color));
   const options = candidates.length ? candidates : available.filter(unused);
   const references = [...new Set([...rawColors, ...used])].map(rgb).filter((value) => value !== undefined);
   const distance = (color: string) => {
-    const candidate = rgb(color)!;
+    const candidate = rgb(color);
+    if (!candidate) return -Infinity;
     return references.reduce((nearest, reference) => Math.min(nearest,
       candidate.reduce((sum, value, channel) => sum + (value - reference[channel]) ** 2, 0)), Infinity);
   };
-  return (options.length ? options : available).reduce((best, color) =>
-    distance(color) > distance(best) ? color : best);
+  const [first, ...rest] = options.length ? options : available;
+  return rest.reduce((best, color) => distance(color) > distance(best) ? color : best, first ?? source);
 }

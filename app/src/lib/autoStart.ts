@@ -1,13 +1,15 @@
 import type { AutoStartRule, Dataset, RowFilter } from '../types';
 
 export const defaultPlateauPoints = 5;
+export const minPlateauPoints = 3;
+export const maxPlateauPoints = 30;
 
 export function validPlateauPoints(points: number): boolean {
-  return Number.isInteger(points) && points >= 3 && points <= 30;
+  return Number.isInteger(points) && points >= minPlateauPoints && points <= maxPlateauPoints;
 }
 
-function median(values: number[]): number {
-  values.sort((a, b) => a - b);
+function median(input: readonly number[]): number {
+  const values = [...input].sort((a, b) => a - b);
   const middle = Math.floor(values.length / 2);
   return values.length % 2 ? values[middle] : values[middle - 1] / 2 + values[middle] / 2;
 }

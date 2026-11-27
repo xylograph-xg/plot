@@ -20,6 +20,7 @@ export interface ResolvedSeries {
 }
 
 const resolvedDatasets = new WeakMap<Dataset, WeakMap<SeriesMapping, ResolvedSeries[]>>();
+const datasetPoints = new WeakMap<Dataset, Map<string, { group?: string; points: XYPoint[] }[]>>();
 
 export function resolveSeries(mapping: SeriesMapping, datasets: Dataset[]): ResolvedSeries[] {
   const ds = datasets.find((d) => d.id === mapping.datasetId);
@@ -31,18 +32,34 @@ export function resolveSeries(mapping: SeriesMapping, datasets: Dataset[]): Reso
   }
   const existing = resolved.get(mapping);
   if (existing) return existing;
-  const series = resolveDataset(mapping, ds);
+  const { xCol, yCol, errCol, groupCol, sizeCol } = mapping;
+  const key = JSON.stringify([xCol, yCol, errCol, groupCol, sizeCol]);
+  let data = datasetPoints.get(ds);
+  if (!data) {
+    data = new Map();
+    datasetPoints.set(ds, data);
+  }
+  let groups = data.get(key);
+  if (!groups) {
+    groups = resolveDataset(mapping, ds);
+    data.set(key, groups);
+    const oldest = data.keys().next().value;
+    if (data.size > 12 && oldest !== undefined) data.delete(oldest);
+  }
+  const series = groups.map(({ group, points }) => ({
+    mapping, points,
+    sid: group === undefined ? `m:${mapping.id}` : `m:${mapping.id}:${group}`,
+    name: group ?? (mapping.name || ds.columns[yCol] || 'Series'),
+  }));
   resolved.set(mapping, series);
   return series;
 }
 
-function resolveDataset(mapping: SeriesMapping, ds: Dataset): ResolvedSeries[] {
+function resolveDataset(mapping: SeriesMapping, ds: Dataset) {
   const indexed = ds.rows
     .map((r, idx) => ({ r, idx }));
-  const mk = (rs: typeof indexed, name: string, sid: string): ResolvedSeries => ({
-    sid,
-    name,
-    mapping,
+  const mk = (rs: typeof indexed, group?: string) => ({
+    group,
     points: rs
       .map(({ r, idx }) => {
         const x = mapping.xCol >= 0 ? r[mapping.xCol] : idx + 1;
@@ -67,22 +84,24 @@ function resolveDataset(mapping: SeriesMapping, ds: Dataset): ResolvedSeries[] {
       if (!groups.has(g)) groups.set(g, []);
       groups.get(g)!.push(item);
     }
-    return [...groups.entries()].map(([g, rs]) => mk(rs, g, `m:${mapping.id}:${g}`)).filter((group) => group.points.length);
+    return [...groups.entries()].map(([g, rs]) => mk(rs, g)).filter((group) => group.points.length);
   }
-  return [
-    mk(indexed, mapping.name || ds.columns[mapping.yCol] || 'Series', `m:${mapping.id}`),
-  ];
+  return [mk(indexed)];
 }
 
 export function hasCategoricalX(series: ResolvedSeries[]): boolean {
   return series.some((item) => item.points.some((point) => typeof point.x === 'string'));
 }
 
+export function isCurveVisible({ mapping, name }: ResolvedSeries): boolean {
+  return mapping.groupCol >= 0 ? !mapping.hiddenGroups?.includes(name) : !mapping.hidden;
+}
+
 export function supportsTrendline(type: ChartConfig['type']): boolean {
   return type === 'line' || type === 'scatter' || type === 'area';
 }
 
-export function resolveChartSeries(chart: ChartConfig, datasets: Dataset[]): ResolvedSeries[] {
+export function resolveChartSeries(chart: Pick<ChartConfig, 'type' | 'series' | 'spectralAxis'>, datasets: Dataset[]): ResolvedSeries[] {
   const spectral = supportsTrendline(chart.type) ? chart.spectralAxis : undefined;
   return chart.series.flatMap((mapping) => {
     const series = resolveSeries(mapping, datasets);
@@ -93,7 +112,7 @@ export function resolveChartSeries(chart: ChartConfig, datasets: Dataset[]): Res
   });
 }
 
-export function spectralAxisSources(chart: ChartConfig, datasets: Dataset[]) {
+export function spectralAxisSources(chart: Pick<ChartConfig, 'series'>, datasets: Dataset[]) {
   const ids = new Set(chart.series.map(({ datasetId }) => datasetId));
   const views = datasets.filter(({ id }) => ids.has(id)).map(datasetView);
   return chart.series.map((mapping) => {

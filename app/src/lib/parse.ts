@@ -18,7 +18,7 @@ export interface ImportTable {
   sheet?: string;
   columns: string[];
   rows: unknown[][];
-  displayRows?: unknown[][];
+  textColumns: number[];
   fixedHeader?: boolean;
   skippedPreambleRows?: number;
 }
@@ -58,49 +58,55 @@ export function parseCell(value: unknown, asText = false): CellValue {
   return Number.isFinite(number) ? number : text;
 }
 
-function toImportTable(
-  name: string, grid: unknown[][], firstRowHeader: boolean, displayGrid?: unknown[][],
+export function toImportTable(
+  name: string, grid: unknown[][], firstRowHeader: boolean,
+  formatted?: (row: number, column: number) => unknown,
 ): ImportTable {
   const preamble = scanPreamble(grid);
   const start = preamble?.start ?? 0;
   const hasValue = preamble ? nonempty : (cell: unknown) => cell != null && cell !== '';
-  const cleaned = grid.flatMap((row, index) =>
-    index >= start && row.some(hasValue) ? [{ row, index }] : [],
+  let width = preamble?.columns.length ?? 1;
+  let header: unknown[] | undefined = preamble?.columns;
+  const body: { row: unknown[]; index: number }[] = [];
+  const textColumns = new Set<number>();
+  for (let index = start; index < grid.length; index += 1) {
+    const row = grid[index];
+    if (!row.some(hasValue)) continue;
+    width = Math.max(width, preamble ? row.findLastIndex(nonempty) + 1 : row.length);
+    if (!header && firstRowHeader) {
+      header = row;
+      continue;
+    }
+    body.push({ row, index });
+    for (let column = 0; column < row.length; column += 1) {
+      if (textColumns.has(column)) continue;
+      const value = formatted?.(index, column) ?? row[column];
+      if (typeof value === 'string' && paddedInteger.test(value.trim())) textColumns.add(column);
+    }
+  }
+  const columns = Array.from({ length: width }, (_, column) =>
+    String(header?.[column] ?? '').trim() || `Col${column + 1}`,
   );
-  const width = preamble
-    ? cleaned.reduce<number>((max, { row }) => Math.max(max, row.findLastIndex(nonempty) + 1), preamble.columns.length)
-    : cleaned.reduce((max, { row }) => Math.max(max, row.length), 1);
-  const header = preamble?.columns ?? (firstRowHeader ? cleaned[0]?.row : undefined);
-  const columns = Array.from({ length: width }, (_, col) =>
-    String(header?.[col] ?? '').trim() || `Col${col + 1}`,
-  );
-  const body = firstRowHeader && !preamble ? cleaned.slice(1) : cleaned;
   return {
     name,
     columns,
-    rows: body.map(({ row }) => row),
-    displayRows: displayGrid && body.map(({ index }) => displayGrid[index]),
+    rows: body.map(({ row, index }) => formatted && textColumns.size
+      ? row.map((value, column) => textColumns.has(column) ? formatted(index, column) ?? value : value)
+      : row),
+    textColumns: [...textColumns].sort((a, b) => a - b),
     fixedHeader: preamble ? true : undefined,
     skippedPreambleRows: preamble?.start,
   };
 }
 
 export function datasetFromTable(table: ImportTable, id: string): Dataset {
-  const textColumns = table.columns.flatMap((_, col) => {
-    const values = table.displayRows ?? table.rows;
-    return values.some((row) => typeof row[col] === 'string' && paddedInteger.test(row[col].trim()))
-      ? [col]
-      : [];
-  });
-  const text = new Set(textColumns);
+  const text = new Set(table.textColumns);
   return {
     id,
     name: table.name,
     columns: table.columns,
-    textColumns,
-    rows: table.rows.map((row, ri) => table.columns.map((_, ci) =>
-      parseCell(text.has(ci) ? table.displayRows?.[ri]?.[ci] ?? row[ci] : row[ci], text.has(ci)),
-    )),
+    textColumns: table.textColumns,
+    rows: table.rows.map((row) => table.columns.map((_, column) => parseCell(row[column], text.has(column)))),
   };
 }
 
@@ -131,26 +137,45 @@ function inspectJson(text: string, name: string, firstRowHeader: boolean): Impor
     const value = Object.hasOwn(record, key) ? record[key] : null;
     return value !== null && typeof value === 'object' ? JSON.stringify(value) : value;
   }));
-  return { name, columns: columns.length ? columns : ['Col1'], rows, fixedHeader: true };
+  const table = toImportTable(name, [columns, ...rows], true);
+  return { ...table, columns: columns.length ? columns : ['Col1'], rows, fixedHeader: true };
 }
 
-export async function inspectFile(file: File, firstRowHeader: boolean): Promise<ImportTable[]> {
+export interface ImportSheet {
+  name: string;
+  sheet?: string;
+  read(): ImportTable;
+}
+
+export async function inspectFile(
+  file: File | { name: string; buffer: ArrayBuffer }, firstRowHeader: boolean,
+): Promise<ImportSheet[]> {
   const baseName = file.name.replace(/\.[^.]+$/, '');
   const ext = file.name.split('.').pop()?.toLowerCase();
   if (ext && workbookExtensions.has(ext)) {
     const XLSX = await import('xlsx');
-    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-    return wb.SheetNames.map((sheetName) => {
-      const sheet = wb.Sheets[sheetName];
-      const options = { header: 1 as const, defval: null };
-      const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, options);
-      const formatted = XLSX.utils.sheet_to_json<unknown[]>(sheet, { ...options, raw: false });
-      const name = wb.SheetNames.length > 1 ? `${baseName} · ${sheetName}` : baseName;
-      return { ...toImportTable(name, grid, firstRowHeader, formatted), sheet: sheetName };
+    const buffer = 'buffer' in file ? file.buffer : await file.arrayBuffer();
+    const { SheetNames: sheets } = XLSX.read(buffer, { type: 'array', bookSheets: true });
+    return sheets.map((sheetName) => {
+      const name = sheets.length > 1 ? `${baseName} · ${sheetName}` : baseName;
+      const read = () => {
+        const workbook = XLSX.read(buffer, { type: 'array', dense: true, sheets: sheetName });
+        const sheet = workbook.Sheets[sheetName];
+        const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
+        const origin = XLSX.utils.decode_range(sheet['!ref'] ?? 'A1').s;
+        const formatted = (row: number, column: number) => {
+          const r = row + origin.r;
+          const c = column + origin.c;
+          return (sheet['!data'] ? sheet['!data'][r]?.[c] : sheet[XLSX.utils.encode_cell({ r, c })])?.w;
+        };
+        return { ...toImportTable(name, grid, firstRowHeader, formatted), sheet: sheetName };
+      };
+      return { name, sheet: sheetName, read };
     });
   }
-  const text = await file.text();
-  return [ext === 'json' ? inspectJson(text, baseName, firstRowHeader) : inspectDelimitedText(text, baseName, firstRowHeader)];
+  const text = 'buffer' in file ? new TextDecoder().decode(file.buffer) : await file.text();
+  const read = () => ext === 'json' ? inspectJson(text, baseName, firstRowHeader) : inspectDelimitedText(text, baseName, firstRowHeader);
+  return [{ name: baseName, read }];
 }
 
 /** Extract numeric values of one column. */
@@ -163,12 +188,14 @@ export function numericColumn(ds: Dataset, col: number): number[] {
 
 /** All column indices that contain mostly numbers. */
 export function numericColumnIndices(ds: Dataset): number[] {
-  return ds.columns
-    .map((_, i) => i)
-    .filter((i) => {
-      const vals = ds.rows.map((r) => r[i]).filter((v) => v !== null);
-      if (vals.length === 0) return false;
-      const numeric = vals.filter((v) => typeof v === 'number').length;
-      return numeric / vals.length > 0.6;
-    });
+  const populated = new Uint32Array(ds.columns.length);
+  const numeric = new Uint32Array(ds.columns.length);
+  for (const row of ds.rows) {
+    for (let column = 0; column < ds.columns.length; column += 1) {
+      const value = row[column];
+      if (value !== null) populated[column] += 1;
+      if (typeof value === 'number') numeric[column] += 1;
+    }
+  }
+  return ds.columns.flatMap((_, index) => numeric[index] > populated[index] * 0.6 ? [index] : []);
 }
