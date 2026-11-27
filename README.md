@@ -19,7 +19,7 @@
 
 ## 构建桌面应用
 
-使用 Node.js 24。
+使用 Node.js 24。构建时将工具箱检出到与本项目相邻的 tools 目录，光谱分峰依赖其中的 [Voigt 线形工具](../tools/voigt_profile/README.md)。
 
 ```sh
 cd app
